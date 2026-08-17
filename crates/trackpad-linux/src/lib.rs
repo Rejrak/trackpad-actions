@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use evdev::{AbsoluteAxisCode, AbsInfo, Device, EventType, InputEvent, PropType};
+use evdev::{AbsInfo, AbsoluteAxisCode, Device, EventType, InputEvent, PropType};
 use trackpad_core::{Contact, TouchFrame};
 
 #[derive(Debug, Clone)]
@@ -140,8 +140,8 @@ pub struct TouchpadReader {
 impl TouchpadReader {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let device = Device::open(path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
+        let device =
+            Device::open(path).with_context(|| format!("failed to open {}", path.display()))?;
 
         let axes = device
             .supported_absolute_axes()

@@ -10,8 +10,8 @@ use actions::{BrightnessAction, ContinuousAction, PrintAction, VolumeAction};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use config::{
-    user_config_path, write_default_user_config, ActionConfig, AppConfig, BindingConfig, EdgeConfig,
-    GestureConfig,
+    user_config_path, write_default_user_config, ActionConfig, AppConfig, BindingConfig,
+    EdgeConfig, GestureConfig,
 };
 use trackpad_core::{Edge, EdgeSwipeRecognizer, GestureEngine, GestureEvent, GesturePhase};
 use trackpad_linux::{auto_select_touchpad, list_devices, TouchpadReader};
@@ -115,7 +115,9 @@ fn devices() -> Result<()> {
 
     if devices.is_empty() {
         println!("No multitouch candidates are readable by the current user.");
-        println!("Install the trackpadd udev/uaccess rule or grant a temporary ACL for development.");
+        println!(
+            "Install the trackpadd udev/uaccess rule or grant a temporary ACL for development."
+        );
         return Ok(());
     }
 
@@ -332,7 +334,11 @@ fn dispatch_action(
             let sign = if binding.invert { -1.0 } else { 1.0 };
             let delta = event.delta * binding.sensitivity * sign;
             if let Some(value) = action.update(delta)? {
-                println!("VALUE action={} value={:.0}%", binding.action, value * 100.0);
+                println!(
+                    "VALUE action={} value={:.0}%",
+                    binding.action,
+                    value * 100.0
+                );
             }
             Ok(())
         }

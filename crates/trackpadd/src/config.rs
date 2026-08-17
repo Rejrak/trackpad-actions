@@ -52,8 +52,7 @@ pub fn write_default_user_config(force: bool) -> Result<PathBuf> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("invalid config path: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
     fs::write(&path, EXAMPLE_CONFIG)
         .with_context(|| format!("failed to write {}", path.display()))?;
 

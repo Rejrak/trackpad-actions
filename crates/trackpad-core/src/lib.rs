@@ -194,9 +194,7 @@ mod tests {
     fn frame(id: Option<i32>, x: f64, y: f64) -> TouchFrame {
         TouchFrame {
             timestamp_us: 0,
-            contacts: id
-                .map(|id| vec![Contact { id, x, y }])
-                .unwrap_or_default(),
+            contacts: id.map(|id| vec![Contact { id, x, y }]).unwrap_or_default(),
         }
     }
 

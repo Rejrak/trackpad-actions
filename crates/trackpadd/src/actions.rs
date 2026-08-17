@@ -131,7 +131,7 @@ impl VolumeAction {
     fn read_value(&self) -> Result<f64> {
         let output = Command::new(&self.command)
             .env("LC_ALL", "C")
-            .args(["get-volume", "@DEFAULT_AUDIO_SINK@"]) 
+            .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
             .output()
             .with_context(|| format!("failed to execute {}", self.command))?;
 
