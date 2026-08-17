@@ -203,6 +203,137 @@ impl ContinuousAction for VolumeAction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandTrigger {
+    Start,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandDirection {
+    Any,
+    Up,
+    Down,
+}
+
+pub struct CommandAction {
+    id: String,
+    command: String,
+    args: Vec<String>,
+    trigger: CommandTrigger,
+    direction: CommandDirection,
+    threshold: f64,
+    max_delta: f64,
+    min_delta: f64,
+    executed: bool,
+}
+
+impl CommandAction {
+    pub fn new(
+        id: String,
+        command: String,
+        args: Vec<String>,
+        trigger: CommandTrigger,
+        direction: CommandDirection,
+        threshold: f64,
+    ) -> Result<Self> {
+        if command.trim().is_empty() {
+            bail!("command action command must not be empty");
+        }
+        if !threshold.is_finite() || threshold <= 0.0 {
+            bail!("command action threshold must be a finite value > 0");
+        }
+
+        Ok(Self {
+            id,
+            command,
+            args,
+            trigger,
+            direction,
+            threshold,
+            max_delta: 0.0,
+            min_delta: 0.0,
+            executed: false,
+        })
+    }
+
+    fn direction_matches(&self) -> bool {
+        match self.direction {
+            CommandDirection::Any => {
+                self.max_delta >= self.threshold || self.min_delta <= -self.threshold
+            }
+            CommandDirection::Up => self.max_delta >= self.threshold,
+            CommandDirection::Down => self.min_delta <= -self.threshold,
+        }
+    }
+
+    fn spawn_command(&mut self) -> Result<()> {
+        if self.executed {
+            return Ok(());
+        }
+
+        let mut child = Command::new(&self.command)
+            .args(&self.args)
+            .spawn()
+            .with_context(|| format!("failed to execute command action '{}'", self.id))?;
+
+        let action_id = self.id.clone();
+        let pid = child.id();
+        println!("COMMAND action={} pid={pid}", self.id);
+
+        std::thread::spawn(move || match child.wait() {
+            Ok(status) if !status.success() => {
+                eprintln!("COMMAND ERROR action='{action_id}' pid={pid} exited with {status}");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("COMMAND ERROR action='{action_id}' pid={pid} wait failed: {error}");
+            }
+        });
+
+        self.executed = true;
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.max_delta = 0.0;
+        self.min_delta = 0.0;
+        self.executed = false;
+    }
+}
+
+impl ContinuousAction for CommandAction {
+    fn begin(&mut self) -> Result<()> {
+        self.reset();
+
+        if self.trigger == CommandTrigger::Start {
+            self.spawn_command()?;
+        }
+
+        Ok(())
+    }
+
+    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+        self.max_delta = self.max_delta.max(delta);
+        self.min_delta = self.min_delta.min(delta);
+        Ok(None)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        if self.trigger == CommandTrigger::End && self.direction_matches() {
+            self.spawn_command()?;
+        }
+
+        self.reset();
+        Ok(())
+    }
+
+    fn cancel(&mut self) -> Result<()> {
+        self.reset();
+        Ok(())
+    }
+}
+
 pub struct PrintAction {
     label: String,
 }
@@ -240,4 +371,50 @@ fn validate_range(min: f64, max: f64) -> Result<()> {
         bail!("invalid action range: min={min}, max={max}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action(direction: CommandDirection, threshold: f64) -> CommandAction {
+        CommandAction::new(
+            "test".to_string(),
+            "true".to_string(),
+            Vec::new(),
+            CommandTrigger::End,
+            direction,
+            threshold,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn command_direction_any_uses_absolute_delta() {
+        let mut action = action(CommandDirection::Any, 0.10);
+        action.min_delta = -0.20;
+        assert!(action.direction_matches());
+    }
+
+    #[test]
+    fn command_direction_up_requires_positive_threshold() {
+        let mut action = action(CommandDirection::Up, 0.10);
+        action.max_delta = 0.11;
+        assert!(action.direction_matches());
+
+        action.max_delta = 0.0;
+        action.min_delta = -0.50;
+        assert!(!action.direction_matches());
+    }
+
+    #[test]
+    fn command_direction_down_requires_negative_threshold() {
+        let mut action = action(CommandDirection::Down, 0.10);
+        action.min_delta = -0.11;
+        assert!(action.direction_matches());
+
+        action.min_delta = 0.0;
+        action.max_delta = 0.50;
+        assert!(!action.direction_matches());
+    }
 }

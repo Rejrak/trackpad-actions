@@ -88,6 +88,18 @@ impl AppConfig {
                         bail!("print action '{id}' label must not be empty when provided");
                     }
                 }
+                ActionConfig::Command {
+                    command, threshold, ..
+                } => {
+                    if command.trim().is_empty() {
+                        bail!("command action '{id}' command must not be empty");
+                    }
+                    if !threshold.is_finite() || *threshold <= 0.0 {
+                        bail!(
+                            "command action '{id}' threshold must be a finite value > 0; got {threshold}"
+                        );
+                    }
+                }
             }
         }
 
@@ -262,12 +274,44 @@ pub enum ActionConfig {
         id: String,
         label: Option<String>,
     },
+    Command {
+        id: String,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        trigger: CommandTriggerConfig,
+        #[serde(default)]
+        direction: CommandDirectionConfig,
+        #[serde(default = "default_command_threshold")]
+        threshold: f64,
+    },
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommandTriggerConfig {
+    Start,
+    #[default]
+    End,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommandDirectionConfig {
+    #[default]
+    Any,
+    Up,
+    Down,
 }
 
 impl ActionConfig {
     fn id(&self) -> &str {
         match self {
-            Self::Brightness { id, .. } | Self::Volume { id, .. } | Self::Print { id, .. } => id,
+            Self::Brightness { id, .. }
+            | Self::Volume { id, .. }
+            | Self::Print { id, .. }
+            | Self::Command { id, .. } => id,
         }
     }
 }
@@ -334,6 +378,10 @@ fn default_brightness_command() -> String {
 
 fn default_volume_command() -> String {
     "wpctl".to_string()
+}
+
+fn default_command_threshold() -> f64 {
+    0.10
 }
 
 #[cfg(test)]
@@ -536,5 +584,115 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("invalid sensitivity"));
+    }
+
+    #[test]
+    fn command_action_defaults_are_valid() {
+        let config = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[actions]]
+            id = "lock"
+            type = "command"
+            command = "loginctl"
+            args = ["lock-session"]
+
+            [[bindings]]
+            gesture = "edge"
+            action = "lock"
+            "#,
+        )
+        .unwrap();
+
+        let ActionConfig::Command {
+            trigger,
+            direction,
+            threshold,
+            ..
+        } = &config.actions[0]
+        else {
+            panic!("expected command action");
+        };
+
+        assert_eq!(*trigger, CommandTriggerConfig::End);
+        assert_eq!(*direction, CommandDirectionConfig::Any);
+        assert!((*threshold - 0.10).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn command_action_parses_direction_and_trigger() {
+        let config = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[actions]]
+            id = "workspace"
+            type = "command"
+            command = "example"
+            args = ["next"]
+            trigger = "end"
+            direction = "up"
+            threshold = 0.20
+
+            [[bindings]]
+            gesture = "edge"
+            action = "workspace"
+            "#,
+        )
+        .unwrap();
+
+        let ActionConfig::Command {
+            trigger,
+            direction,
+            threshold,
+            ..
+        } = &config.actions[0]
+        else {
+            panic!("expected command action");
+        };
+
+        assert_eq!(*trigger, CommandTriggerConfig::End);
+        assert_eq!(*direction, CommandDirectionConfig::Up);
+        assert!((*threshold - 0.20).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn command_action_empty_command_is_rejected() {
+        let error = parse(
+            r#"
+            [[actions]]
+            id = "broken"
+            type = "command"
+            command = "   "
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("command must not be empty"));
+    }
+
+    #[test]
+    fn command_action_non_positive_threshold_is_rejected() {
+        let error = parse(
+            r#"
+            [[actions]]
+            id = "broken"
+            type = "command"
+            command = "true"
+            threshold = 0.0
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("threshold must be a finite value > 0"));
     }
 }

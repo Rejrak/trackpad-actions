@@ -6,12 +6,15 @@ use std::{
     path::PathBuf,
 };
 
-use actions::{BrightnessAction, ContinuousAction, PrintAction, VolumeAction};
+use actions::{
+    BrightnessAction, CommandAction, CommandDirection, CommandTrigger, ContinuousAction,
+    PrintAction, VolumeAction,
+};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use config::{
     user_config_path, write_default_user_config, ActionConfig, AppConfig, BindingConfig,
-    DeviceConfig, EdgeConfig, GestureConfig,
+    CommandDirectionConfig, CommandTriggerConfig, DeviceConfig, EdgeConfig, GestureConfig,
 };
 use trackpad_core::{Edge, EdgeSwipeRecognizer, GestureEngine, GestureEvent, GesturePhase};
 use trackpad_linux::{
@@ -326,6 +329,27 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
             ActionConfig::Print { id, label } => {
                 let label = label.unwrap_or_else(|| id.clone());
                 (id, Box::new(PrintAction::new(label)))
+            }
+            ActionConfig::Command {
+                id,
+                command,
+                args,
+                trigger,
+                direction,
+                threshold,
+            } => {
+                let trigger = match trigger {
+                    CommandTriggerConfig::Start => CommandTrigger::Start,
+                    CommandTriggerConfig::End => CommandTrigger::End,
+                };
+                let direction = match direction {
+                    CommandDirectionConfig::Any => CommandDirection::Any,
+                    CommandDirectionConfig::Up => CommandDirection::Up,
+                    CommandDirectionConfig::Down => CommandDirection::Down,
+                };
+                let implementation =
+                    CommandAction::new(id.clone(), command, args, trigger, direction, threshold)?;
+                (id, Box::new(implementation))
             }
         };
 

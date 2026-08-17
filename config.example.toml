@@ -46,6 +46,34 @@ command = "wpctl"
 min = 0.0
 max = 1.0
 
+
+# Generic one-shot command action.
+#
+# Commands are executed directly, without an implicit shell. Use `args` for
+# arguments. If shell syntax is really needed, invoke a shell explicitly, for
+# example command = "sh" and args = ["-c", "..."].
+#
+# The default trigger is "end": the command runs only when the gesture ends
+# normally and the transformed delta reaches `threshold` at least once.
+#
+# direction can be "any", "up", or "down". `sensitivity` and `invert` from the
+# binding are applied before this threshold/direction check.
+#
+# [[actions]]
+# id = "lock-session"
+# type = "command"
+# command = "loginctl"
+# args = ["lock-session"]
+# trigger = "end"
+# direction = "any"
+# threshold = 0.10
+#
+# [[bindings]]
+# gesture = "right-edge"
+# action = "lock-session"
+# sensitivity = 1.0
+# invert = false
+
 # Moving upward produces a positive delta, so both values increase.
 [[bindings]]
 gesture = "right-edge"
