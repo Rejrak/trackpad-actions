@@ -11,10 +11,12 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use config::{
     user_config_path, write_default_user_config, ActionConfig, AppConfig, BindingConfig,
-    EdgeConfig, GestureConfig,
+    DeviceConfig, EdgeConfig, GestureConfig,
 };
 use trackpad_core::{Edge, EdgeSwipeRecognizer, GestureEngine, GestureEvent, GesturePhase};
-use trackpad_linux::{auto_select_touchpad, list_devices, TouchpadReader};
+use trackpad_linux::{
+    auto_select_touchpad, compatible_devices, list_devices, DeviceInfo, TouchpadReader,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "trackpadd")]
@@ -45,7 +47,7 @@ enum Commands {
 
     /// Run configured gesture -> action mappings.
     Run {
-        /// Explicit evdev path. If omitted, auto-select when exactly one compatible touchpad exists.
+        /// Explicit evdev path. Overrides the configured device selector when present.
         #[arg(long)]
         device: Option<PathBuf>,
 
@@ -70,7 +72,7 @@ fn main() -> Result<()> {
             device,
             config,
             dry_run,
-        } => run(resolve_device(device)?, resolve_config(config)?, dry_run),
+        } => run(device, resolve_config(config)?, dry_run),
     }
 }
 
@@ -86,6 +88,68 @@ fn resolve_device(device: Option<PathBuf>) -> Result<PathBuf> {
         selected.name
     );
     Ok(selected.path)
+}
+
+fn resolve_run_device(
+    explicit_device: Option<PathBuf>,
+    configured_device: Option<&DeviceConfig>,
+) -> Result<PathBuf> {
+    if let Some(device) = explicit_device {
+        println!("Using explicit touchpad: {}", device.display());
+        return Ok(device);
+    }
+
+    if let Some(selector) = configured_device {
+        let selected = select_configured_touchpad(compatible_devices(), selector)?;
+        println!(
+            "Selected configured touchpad: {} ({})",
+            selected.path.display(),
+            selected.name
+        );
+        return Ok(selected.path);
+    }
+
+    resolve_device(None)
+}
+
+fn select_configured_touchpad(
+    devices: Vec<DeviceInfo>,
+    selector: &DeviceConfig,
+) -> Result<DeviceInfo> {
+    let matches = devices
+        .into_iter()
+        .filter(|device| selector.matches(&device.name, device.vendor, device.product))
+        .collect::<Vec<_>>();
+
+    match matches.as_slice() {
+        [] => bail!(
+            "no compatible readable touchpad matches configured selector ({}); \
+             run `trackpadd devices` and verify [device]",
+            selector.description()
+        ),
+        [device] => Ok(device.clone()),
+        many => {
+            let candidates = many
+                .iter()
+                .map(|device| {
+                    format!(
+                        "{} ({}, vendor=0x{:04x}, product=0x{:04x})",
+                        device.path.display(),
+                        device.name,
+                        device.vendor,
+                        device.product
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            bail!(
+                "configured device selector ({}) matches multiple compatible touchpads \
+                 ({candidates}); make [device] more specific or pass --device explicitly",
+                selector.description()
+            )
+        }
+    }
 }
 
 fn resolve_config(config: Option<PathBuf>) -> Result<PathBuf> {
@@ -133,6 +197,12 @@ fn devices() -> Result<()> {
         println!("    x range:    {}..{}", device.x_min, device.x_max);
         println!("    y range:    {}..{}", device.y_min, device.y_max);
         println!("    compatible: {}", device.compatible);
+        if device.compatible {
+            println!(
+                "    selector:   vendor=0x{:04x} product=0x{:04x}",
+                device.vendor, device.product
+            );
+        }
         println!();
     }
 
@@ -177,9 +247,12 @@ fn monitor(device: PathBuf) -> Result<()> {
     }
 }
 
-fn run(device: PathBuf, config_path: PathBuf, dry_run: bool) -> Result<()> {
+fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<()> {
     let config = AppConfig::load(&config_path)?;
+    let device = resolve_run_device(device, config.device.as_ref())?;
+
     let AppConfig {
+        device: _,
         gestures,
         actions,
         bindings,
@@ -356,5 +429,68 @@ fn print_gesture(event: &GestureEvent) {
         ),
         GesturePhase::Ended => println!("GESTURE {} ended", event.gesture_id),
         GesturePhase::Cancelled => println!("GESTURE {} cancelled", event.gesture_id),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(path: &str, name: &str, vendor: u16, product: u16) -> DeviceInfo {
+        DeviceInfo {
+            path: PathBuf::from(path),
+            name: name.to_string(),
+            vendor,
+            product,
+            pointer: true,
+            direct: false,
+            semi_mt: false,
+            slots: 5,
+            x_min: 0,
+            x_max: 1000,
+            y_min: 0,
+            y_max: 700,
+            compatible: true,
+        }
+    }
+
+    #[test]
+    fn configured_selector_selects_unique_device() {
+        let selector = DeviceConfig {
+            name: None,
+            vendor: Some(0x04f3),
+            product: Some(0x3140),
+        };
+
+        let selected = select_configured_touchpad(
+            vec![
+                device("/dev/input/event4", "Touchpad A", 0x04f3, 0x3140),
+                device("/dev/input/event5", "Touchpad B", 0x1234, 0x5678),
+            ],
+            &selector,
+        )
+        .unwrap();
+
+        assert_eq!(selected.path, PathBuf::from("/dev/input/event4"));
+    }
+
+    #[test]
+    fn configured_selector_rejects_ambiguous_match() {
+        let selector = DeviceConfig {
+            name: None,
+            vendor: Some(0x04f3),
+            product: Some(0x3140),
+        };
+
+        let error = select_configured_touchpad(
+            vec![
+                device("/dev/input/event4", "Touchpad A", 0x04f3, 0x3140),
+                device("/dev/input/event5", "Touchpad B", 0x04f3, 0x3140),
+            ],
+            &selector,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("matches multiple"));
     }
 }

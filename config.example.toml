@@ -1,3 +1,18 @@
+# Optional persistent touchpad selector.
+#
+# Prefer vendor/product (and optionally name) over /dev/input/eventX because event
+# numbers may change after a reboot. Fields are combined with AND.
+#
+# Find the suggested values with:
+#   trackpadd devices
+#
+# Uncomment and replace these values with your own touchpad:
+#
+# [device]
+# vendor = 0x04f3
+# product = 0x3140
+# name = "Example Touchpad"
+
 # The gesture starts only when a new finger contact appears inside the edge zone.
 # width = 0.06 means the outer 6% of the physical trackpad.
 
