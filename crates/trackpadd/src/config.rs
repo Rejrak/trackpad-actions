@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -32,10 +33,99 @@ impl AppConfig {
         Ok(config)
     }
 
-    fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if let Some(device) = &self.device {
             device.validate()?;
         }
+
+        let mut gesture_ids = HashSet::new();
+        for gesture in &self.gestures {
+            let id = gesture.id();
+            validate_id("gesture", id)?;
+
+            if !gesture_ids.insert(id.to_string()) {
+                bail!("duplicate gesture id: {id}");
+            }
+
+            match gesture {
+                GestureConfig::EdgeSwipe {
+                    width,
+                    cancel_margin,
+                    ..
+                } => {
+                    validate_finite_range("gesture width", id, *width, 0.001, 0.49)?;
+                    validate_finite_range("gesture cancel_margin", id, *cancel_margin, 0.0, 0.49)?;
+                }
+            }
+        }
+
+        let mut action_ids = HashSet::new();
+        for action in &self.actions {
+            let id = action.id();
+            validate_id("action", id)?;
+
+            if !action_ids.insert(id.to_string()) {
+                bail!("duplicate action id: {id}");
+            }
+
+            match action {
+                ActionConfig::Brightness {
+                    command, min, max, ..
+                }
+                | ActionConfig::Volume {
+                    command, min, max, ..
+                } => {
+                    if command.trim().is_empty() {
+                        bail!("action '{id}' command must not be empty");
+                    }
+                    validate_action_range(id, *min, *max)?;
+                }
+                ActionConfig::Print { label, .. } => {
+                    if label
+                        .as_deref()
+                        .is_some_and(|label| label.trim().is_empty())
+                    {
+                        bail!("print action '{id}' label must not be empty when provided");
+                    }
+                }
+            }
+        }
+
+        let mut binding_pairs = HashSet::new();
+        for binding in &self.bindings {
+            if binding.gesture.trim().is_empty() {
+                bail!("binding gesture id must not be empty");
+            }
+            if binding.action.trim().is_empty() {
+                bail!("binding action id must not be empty");
+            }
+
+            if !gesture_ids.contains(&binding.gesture) {
+                bail!("binding references unknown gesture: {}", binding.gesture);
+            }
+            if !action_ids.contains(&binding.action) {
+                bail!("binding references unknown action: {}", binding.action);
+            }
+
+            if !binding.sensitivity.is_finite() || binding.sensitivity <= 0.0 {
+                bail!(
+                    "binding gesture='{}' action='{}' has invalid sensitivity {}; expected a finite value > 0",
+                    binding.gesture,
+                    binding.action,
+                    binding.sensitivity
+                );
+            }
+
+            let pair = (binding.gesture.clone(), binding.action.clone());
+            if !binding_pairs.insert(pair) {
+                bail!(
+                    "duplicate binding for gesture '{}' and action '{}'",
+                    binding.gesture,
+                    binding.action
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -132,6 +222,14 @@ pub enum GestureConfig {
     },
 }
 
+impl GestureConfig {
+    fn id(&self) -> &str {
+        match self {
+            Self::EdgeSwipe { id, .. } => id,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 pub enum EdgeConfig {
@@ -166,6 +264,14 @@ pub enum ActionConfig {
     },
 }
 
+impl ActionConfig {
+    fn id(&self) -> &str {
+        match self {
+            Self::Brightness { id, .. } | Self::Volume { id, .. } | Self::Print { id, .. } => id,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct BindingConfig {
     pub gesture: String,
@@ -174,6 +280,32 @@ pub struct BindingConfig {
     pub sensitivity: f64,
     #[serde(default)]
     pub invert: bool,
+}
+
+fn validate_id(kind: &str, id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        bail!("{kind} id must not be empty");
+    }
+    Ok(())
+}
+
+fn validate_finite_range(label: &str, id: &str, value: f64, min: f64, max: f64) -> Result<()> {
+    if !value.is_finite() || !(min..=max).contains(&value) {
+        bail!("{label} for '{id}' must be between {min} and {max}; got {value}");
+    }
+    Ok(())
+}
+
+fn validate_action_range(id: &str, min: f64, max: f64) -> Result<()> {
+    if !min.is_finite()
+        || !max.is_finite()
+        || !(0.0..=1.5).contains(&min)
+        || !(0.0..=1.5).contains(&max)
+        || min >= max
+    {
+        bail!("action '{id}' has invalid range: min={min}, max={max}");
+    }
+    Ok(())
 }
 
 fn default_width() -> f64 {
@@ -214,6 +346,36 @@ mod tests {
         Ok(config)
     }
 
+    const VALID_CONFIG: &str = r#"
+        [device]
+        vendor = 0x04f3
+        product = 0x3140
+
+        [[gestures]]
+        id = "right-edge"
+        type = "edge-swipe"
+        edge = "right"
+        width = 0.06
+        cancel_margin = 0.04
+
+        [[actions]]
+        id = "brightness"
+        type = "brightness"
+        command = "brightnessctl"
+        min = 0.05
+        max = 1.0
+
+        [[bindings]]
+        gesture = "right-edge"
+        action = "brightness"
+        sensitivity = 1.0
+    "#;
+
+    #[test]
+    fn valid_config_passes_validation() {
+        parse(VALID_CONFIG).unwrap();
+    }
+
     #[test]
     fn device_selector_parses_hex_vendor_and_product() {
         let config = parse(
@@ -249,5 +411,130 @@ mod tests {
         assert!(selector.matches("Example Touchpad", 0x1234, 0xabcd));
         assert!(!selector.matches("Other Touchpad", 0x1234, 0xabcd));
         assert!(!selector.matches("Example Touchpad", 0x9999, 0xabcd));
+    }
+
+    #[test]
+    fn duplicate_gesture_id_is_rejected() {
+        let error = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "right"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate gesture id: edge"));
+    }
+
+    #[test]
+    fn duplicate_action_id_is_rejected() {
+        let error = parse(
+            r#"
+            [[actions]]
+            id = "volume"
+            type = "volume"
+
+            [[actions]]
+            id = "volume"
+            type = "print"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate action id: volume"));
+    }
+
+    #[test]
+    fn binding_to_unknown_gesture_is_rejected() {
+        let error = parse(
+            r#"
+            [[actions]]
+            id = "debug"
+            type = "print"
+
+            [[bindings]]
+            gesture = "missing"
+            action = "debug"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("binding references unknown gesture: missing"));
+    }
+
+    #[test]
+    fn duplicate_binding_is_rejected() {
+        let error = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[actions]]
+            id = "debug"
+            type = "print"
+
+            [[bindings]]
+            gesture = "edge"
+            action = "debug"
+
+            [[bindings]]
+            gesture = "edge"
+            action = "debug"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate binding"));
+    }
+
+    #[test]
+    fn invalid_gesture_width_is_rejected() {
+        let error = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+            width = 0.75
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("gesture width"));
+    }
+
+    #[test]
+    fn non_positive_sensitivity_is_rejected() {
+        let error = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[actions]]
+            id = "debug"
+            type = "print"
+
+            [[bindings]]
+            gesture = "edge"
+            action = "debug"
+            sensitivity = 0.0
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("invalid sensitivity"));
     }
 }

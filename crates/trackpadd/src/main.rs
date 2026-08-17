@@ -38,6 +38,13 @@ enum Commands {
         force: bool,
     },
 
+    /// Parse and validate the configuration without opening a touchpad.
+    CheckConfig {
+        /// Config path. Defaults to $XDG_CONFIG_HOME/trackpadd/config.toml or ~/.config/trackpadd/config.toml.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+
     /// Print normalized touch contacts and edge gesture events.
     Monitor {
         /// Explicit evdev path. If omitted, auto-select when exactly one compatible touchpad exists.
@@ -67,6 +74,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Devices => devices(),
         Commands::InitConfig { force } => init_config(force),
+        Commands::CheckConfig { config } => check_config(resolve_config(config)?),
         Commands::Monitor { device } => monitor(resolve_device(device)?),
         Commands::Run {
             device,
@@ -174,6 +182,22 @@ fn init_config(force: bool) -> Result<()> {
     Ok(())
 }
 
+fn check_config(config_path: PathBuf) -> Result<()> {
+    let config = AppConfig::load(&config_path)?;
+
+    println!("Config OK: {}", config_path.display());
+    if let Some(device) = &config.device {
+        println!("Device selector: {}", device.description());
+    } else {
+        println!("Device selector: automatic");
+    }
+    println!("Gestures: {}", config.gestures.len());
+    println!("Actions: {}", config.actions.len());
+    println!("Bindings: {}", config.bindings.len());
+
+    Ok(())
+}
+
 fn devices() -> Result<()> {
     let devices = list_devices();
 
@@ -258,7 +282,6 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
         bindings,
     } = config;
 
-    let mut gesture_ids = HashSet::new();
     let mut engine = GestureEngine::new();
 
     for gesture in gestures {
@@ -269,10 +292,6 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                 width,
                 cancel_margin,
             } => {
-                if !gesture_ids.insert(id.clone()) {
-                    bail!("duplicate gesture id: {id}");
-                }
-
                 let edge = match edge {
                     EdgeConfig::Left => Edge::Left,
                     EdgeConfig::Right => Edge::Right,
@@ -310,20 +329,11 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
             }
         };
 
-        if action_map.insert(id.clone(), implementation).is_some() {
-            bail!("duplicate action id: {id}");
-        }
+        action_map.insert(id, implementation);
     }
 
     let mut bindings_by_gesture: HashMap<String, Vec<BindingConfig>> = HashMap::new();
     for binding in bindings {
-        if !gesture_ids.contains(&binding.gesture) {
-            bail!("binding references unknown gesture: {}", binding.gesture);
-        }
-        if !action_map.contains_key(&binding.action) {
-            bail!("binding references unknown action: {}", binding.action);
-        }
-
         bindings_by_gesture
             .entry(binding.gesture.clone())
             .or_default()
