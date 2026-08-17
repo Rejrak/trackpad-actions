@@ -1,0 +1,43 @@
+# The gesture starts only when a new finger contact appears inside the edge zone.
+# width = 0.06 means the outer 6% of the physical trackpad.
+
+[[gestures]]
+id = "right-edge"
+type = "edge-swipe"
+edge = "right"
+width = 0.06
+cancel_margin = 0.04
+
+[[gestures]]
+id = "left-edge"
+type = "edge-swipe"
+edge = "left"
+width = 0.06
+cancel_margin = 0.04
+
+# MVP backend: brightnessctl. Keep a non-zero minimum while experimenting.
+[[actions]]
+id = "screen-brightness"
+type = "brightness"
+command = "brightnessctl"
+min = 0.05
+max = 1.0
+
+# MVP backend: wpctl (WirePlumber/PipeWire).
+[[actions]]
+id = "speaker-volume"
+type = "volume"
+command = "wpctl"
+min = 0.0
+max = 1.0
+
+# Moving upward produces a positive delta, so both values increase.
+[[bindings]]
+gesture = "right-edge"
+action = "screen-brightness"
+sensitivity = 1.20
+
+[[bindings]]
+gesture = "left-edge"
+action = "speaker-volume"
+sensitivity = 1.00

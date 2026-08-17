@@ -1,0 +1,12 @@
+[Unit]
+Description=Configurable trackpad gesture daemon
+After=graphical-session-pre.target pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/trackpadd run
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target

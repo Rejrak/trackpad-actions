@@ -1,0 +1,8 @@
+# trackpadd: allow the active local user to access touchpad event devices.
+#
+# This rule intentionally runs before systemd's 71-seat.rules / 73-seat-late.rules.
+# The `uaccess` tag is consumed by systemd-logind/udev to apply a dynamic ACL to
+# the active user on the seat. It does NOT add the user to the broad `input` group.
+#
+# Only event nodes already classified by udev as touchpads are matched.
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"
