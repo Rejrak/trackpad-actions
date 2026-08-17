@@ -1,12 +1,35 @@
-# trackpad-actions v0.2
+# trackpadd
 
-Linux-first configurable trackpad gestures. The project keeps raw Linux input,
-gesture recognition, actions, and desktop UI integration separate.
+Configurable Linux trackpad edge gestures for desktop actions.
 
-Current example:
+`trackpadd` reads multitouch events directly from Linux `evdev`, recognizes configurable edge swipes, and maps them to actions such as screen brightness and speaker volume.
 
-- right edge vertical swipe -> screen brightness
-- left edge vertical swipe -> output volume
+The project intentionally keeps Linux input handling, gesture recognition, configuration, and desktop actions separate so the core is not tied to a particular Linux distribution or desktop environment.
+
+## Features
+
+* One-finger vertical swipes starting from the **left** or **right** physical trackpad edge.
+* Configurable activation width and cancellation margin.
+* Configurable gesture sensitivity and direction inversion.
+* Screen brightness control through `brightnessctl`.
+* Default audio output volume control through `wpctl`.
+* Print/debug actions for testing mappings.
+* Automatic touchpad selection when exactly one compatible device is available.
+* Explicit device selection when multiple compatible touchpads exist.
+* XDG-compatible user configuration.
+* `udev` + `uaccess` integration for safe touchpad access.
+* systemd user service.
+* Monitor and dry-run modes for debugging without modifying system state.
+* No root daemon.
+
+## Default example
+
+| Gesture                      | Action            |
+| ---------------------------- | ----------------- |
+| Vertical swipe on right edge | Screen brightness |
+| Vertical swipe on left edge  | Speaker volume    |
+
+Mappings live in the configuration file and can be changed without recompiling.
 
 ## Architecture
 
@@ -14,224 +37,289 @@ Current example:
 /dev/input/eventX
        |
        v
- trackpad-linux      evdev + MT slots + normalized coordinates
+ trackpad-linux
+ evdev + MT slots
+ normalized coordinates
        |
        v
- trackpad-core       pure gesture recognizers
+ trackpad-core
+ pure gesture recognizers
        |
        v
-    trackpadd        config + bindings + actions
+    trackpadd
+ configuration
+ bindings
+ actions
        |
        +--> brightnessctl
        +--> wpctl
-       +--> future D-Bus / GNOME / KDE adapters
+       +--> future D-Bus / desktop adapters
 ```
 
-Neither `trackpad-core` nor `trackpad-linux` depends on GNOME, KDE, PipeWire,
-systemd, or a particular distro.
-
-## Fedora prerequisites
-
-```bash
-sudo dnf install gcc curl acl brightnessctl wireplumber
-```
-
-Install Rust if needed:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
-rustup component add rustfmt clippy
-```
-
-## Development build
-
-```bash
-cargo test
-cargo build -p trackpadd
-```
-
-## v0.2: auto device selection
-
-`--device` is now optional. If exactly one compatible touchpad is readable,
-trackpadd selects it automatically:
-
-```bash
-./target/debug/trackpadd monitor
-```
-
-or:
-
-```bash
-./target/debug/trackpadd run --config config.example.toml --dry-run
-```
-
-If multiple compatible touchpads exist, trackpadd refuses to guess and asks for
-`--device /dev/input/eventX`.
-
-## v0.2: persistent user config
-
-Create the default config:
-
-```bash
-./target/debug/trackpadd init-config
-```
-
-It writes to:
+Repository layout:
 
 ```text
-$XDG_CONFIG_HOME/trackpadd/config.toml
+crates/
+├── trackpad-core/
+│   └── gesture recognition primitives
+│
+├── trackpad-linux/
+│   └── Linux evdev / multitouch reader
+│
+└── trackpadd/
+    └── CLI, configuration, bindings and actions
+
+packaging/
+├── systemd/
+│   └── trackpadd.service
+│
+└── udev/
+    └── 69-trackpadd.rules
+
+scripts/
+├── install-local.sh
+└── uninstall-local.sh
 ```
 
-or, when `XDG_CONFIG_HOME` is not set:
+## Compatibility
+
+### Official installer
+
+The official installer currently targets Linux desktop systems providing:
+
+* Linux `evdev`;
+* a compatible multitouch touchpad;
+* `udev`;
+* `systemd-logind`;
+* a systemd user manager.
+
+The recommended prebuilt releases are statically linked Linux binaries for:
 
 ```text
-~/.config/trackpadd/config.toml
+x86_64-unknown-linux-musl
+aarch64-unknown-linux-musl
 ```
 
-After that, this is enough:
+Static release builds reduce dependencies on a distribution's libc version.
 
-```bash
-./target/debug/trackpadd run
-```
+The `trackpadd` binary itself is intentionally less distribution-specific than its packaging. Non-systemd distributions may still run it manually, but require their own input permission and service-manager integration.
 
-## v0.2: persistent touchpad access on systemd/logind distros
+### Touchpad requirements
 
-For development we previously used a temporary ACL such as:
-
-```bash
-sudo setfacl -m "u:$(id -un):r--" /dev/input/event4
-```
-
-That is intentionally no longer the installation strategy.
-
-`packaging/udev/69-trackpadd.rules` matches only udev event nodes classified as
-`ID_INPUT_TOUCHPAD=1` and adds `TAG+="uaccess"`. On a systemd/logind desktop this
-allows the active local user to receive a dynamic ACL for the touchpad without
-putting that user in the broad `input` group.
-
-Before installing the rule you can verify your device classification:
-
-```bash
-udevadm info --query=property /dev/input/event4 | grep ID_INPUT_TOUCHPAD
-```
-
-Expected:
+The device must expose multitouch events including:
 
 ```text
-ID_INPUT_TOUCHPAD=1
+ABS_MT_SLOT
+ABS_MT_TRACKING_ID
+ABS_MT_POSITION_X
+ABS_MT_POSITION_Y
 ```
 
-Install/reload manually:
+Direct-input devices such as touchscreens and `SEMI_MT` devices are not currently supported.
 
-```bash
-sudo install -Dm644 \
-  packaging/udev/69-trackpadd.rules \
-  /etc/udev/rules.d/69-trackpadd.rules
+## Runtime dependencies
 
-sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input --action=change
-```
+Rust is **not required** when installing a prebuilt GitHub Release.
 
-Then verify without sudo:
+Some configured actions require external commands.
 
-```bash
-./target/debug/trackpadd devices
-```
+| Feature           | Command         |
+| ----------------- | --------------- |
+| Screen brightness | `brightnessctl` |
+| Speaker volume    | `wpctl`         |
 
-### Test that uaccess really replaced your manual ACL
+`wpctl` is normally provided by WirePlumber.
 
-If you previously added a manual ACL to `/dev/input/event4`, you can remove it:
-
-```bash
-sudo setfacl -x "u:$(id -un)" /dev/input/event4
-```
-
-Then retrigger udev:
-
-```bash
-sudo udevadm trigger --subsystem-match=input --action=change
-```
-
-Check:
-
-```bash
-getfacl /dev/input/event4
-```
-
-Your user should regain access through the dynamic `uaccess` policy.
-
-## v0.2: systemd user service
-
-The daemon must run as your desktop user, not root, because actions such as
-`wpctl` need the user's PipeWire session.
-
-A user unit is included at:
+The installer also expects common Linux utilities including:
 
 ```text
-packaging/systemd/trackpadd.service
+curl
+tar
+sha256sum
+sudo
+udevadm
+systemctl
 ```
 
-For a manual source install:
+## Installation
+
+> Before publishing the repository, replace `YOUR_GITHUB_USERNAME/trackpadd` below and inside `install.sh` with the actual GitHub `OWNER/REPO`.
+
+### Recommended installation
+
+Download and inspect the installer first:
 
 ```bash
-mkdir -p ~/.local/bin ~/.config/systemd/user
+curl -fsSLo trackpadd-install.sh \
+  https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/trackpadd/main/install.sh
+
+less trackpadd-install.sh
+
+bash trackpadd-install.sh
+```
+
+The installer will:
+
+1. verify that the system is Linux;
+2. detect the CPU architecture;
+3. download the correct binary from the latest GitHub Release;
+4. verify its SHA-256 checksum;
+5. install the binary to `~/.local/bin/trackpadd`;
+6. create a default configuration if none exists;
+7. install the systemd user service;
+8. install the restricted `udev/uaccess` rule;
+9. reload udev;
+10. enable and start `trackpadd.service`.
+
+Existing configuration files are preserved during upgrades.
+
+### One-line installation
+
+For users who already trust the repository:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/trackpadd/main/install.sh \
+  | bash
+```
+
+Reviewing an installer before executing it is safer than piping remote code directly into a shell.
+
+### Install a specific version
+
+```bash
+bash trackpadd-install.sh --version v0.2.0
+```
+
+### Update
+
+Run the installer again:
+
+```bash
+bash trackpadd-install.sh
+```
+
+The binary and packaging files are replaced while the existing user configuration is preserved.
+
+### Uninstall
+
+```bash
+bash trackpadd-install.sh --uninstall
+```
+
+The uninstall operation removes:
+
+```text
+~/.local/bin/trackpadd
+systemd user unit
+/etc/udev/rules.d/69-trackpadd.rules
+```
+
+The user configuration is intentionally preserved.
+
+## Build from source
+
+Building from source requires Rust **1.85 or newer**.
+
+Clone the repository:
+
+```bash
+git clone https://github.com/YOUR_GITHUB_USERNAME/trackpadd.git
+cd trackpadd
+```
+
+Verify Rust:
+
+```bash
+rustc --version
+cargo --version
+```
+
+Run tests:
+
+```bash
+cargo test --workspace
+```
+
+Run formatting checks:
+
+```bash
+cargo fmt --all -- --check
+```
+
+Run Clippy:
+
+```bash
+cargo clippy \
+  --workspace \
+  --all-targets \
+  --all-features \
+  -- \
+  -D warnings
+```
+
+Build the optimized daemon:
+
+```bash
 cargo build --release -p trackpadd
-install -Dm755 target/release/trackpadd ~/.local/bin/trackpadd
-./target/release/trackpadd init-config
-install -Dm644 packaging/systemd/trackpadd.service \
-  ~/.config/systemd/user/trackpadd.service
-
-systemctl --user daemon-reload
-systemctl --user enable --now trackpadd.service
 ```
 
-Status/logs:
-
-```bash
-systemctl --user status trackpadd.service
-journalctl --user -u trackpadd.service -f
-```
-
-The service runs simply:
+The executable will be:
 
 ```text
-trackpadd run
+target/release/trackpadd
 ```
 
-so it uses automatic touchpad selection and the XDG user config.
+### Install from a source checkout
 
-## One-command local install on Fedora/systemd
-
-For this development version:
+The repository includes a development/source installer:
 
 ```bash
 ./scripts/install-local.sh
 ```
 
-It:
+It builds the release binary locally and installs the binary, user configuration, systemd unit, and udev rule.
 
-1. builds the release binary;
-2. installs it to `~/.local/bin/trackpadd`;
-3. creates the XDG config if missing;
-4. installs the systemd user unit;
-5. installs the udev `uaccess` rule using sudo;
-6. reloads udev;
-7. enables and starts the user service.
-
-Uninstall the development install with:
+To uninstall:
 
 ```bash
 ./scripts/uninstall-local.sh
 ```
 
-The uninstall script intentionally keeps your user config.
-
 ## Configuration
 
-Example:
+Configuration follows the XDG Base Directory convention.
+
+When `$XDG_CONFIG_HOME` is set:
+
+```text
+$XDG_CONFIG_HOME/trackpadd/config.toml
+```
+
+Otherwise:
+
+```text
+~/.config/trackpadd/config.toml
+```
+
+Create the default configuration with:
+
+```bash
+trackpadd init-config
+```
+
+Overwrite an existing configuration intentionally with:
+
+```bash
+trackpadd init-config --force
+```
+
+### Example configuration
 
 ```toml
+# A gesture starts only when a NEW finger contact appears
+# inside the configured physical edge zone.
+
 [[gestures]]
 id = "right-edge"
 type = "edge-swipe"
@@ -246,12 +334,18 @@ edge = "left"
 width = 0.06
 cancel_margin = 0.04
 
+
+# Screen brightness
+
 [[actions]]
 id = "screen-brightness"
 type = "brightness"
 command = "brightnessctl"
 min = 0.05
 max = 1.0
+
+
+# Default output volume
 
 [[actions]]
 id = "speaker-volume"
@@ -260,38 +354,484 @@ command = "wpctl"
 min = 0.0
 max = 1.0
 
+
+# Bind gestures to actions
+
 [[bindings]]
 gesture = "right-edge"
 action = "screen-brightness"
 sensitivity = 1.20
+invert = false
 
 [[bindings]]
 gesture = "left-edge"
 action = "speaker-volume"
 sensitivity = 1.00
+invert = false
 ```
 
-Gestures and actions remain independent. Swapping the two bindings does not
-require recompilation.
+## Gesture configuration
 
-## Action error behaviour
+An edge swipe supports:
 
-If an action backend fails during `Started` or `Updated`, v0.2 logs the failure
-once and suppresses repeated errors for the remainder of that gesture. The next
-gesture retries the action normally.
+```toml
+[[gestures]]
+id = "right-edge"
+type = "edge-swipe"
+edge = "right"
+width = 0.06
+cancel_margin = 0.04
+```
 
-This avoids floods such as dozens of repeated PipeWire connection failures.
+`id` is the unique gesture identifier.
 
-## Portability strategy
+`edge` can currently be:
 
-The **runtime core remains Linux/distro independent** at the evdev boundary.
-The files under `packaging/` are adapters:
+```text
+left
+right
+```
 
-- `packaging/udev`: device access on udev/logind systems
-- `packaging/systemd`: optional systemd user-service integration
-- future packages can add OpenRC/runit/autostart adapters without changing
-  `trackpad-core` or `trackpad-linux`
+`width` controls the activation zone. For example:
 
-The next architectural milestone is an IPC/event layer (most likely D-Bus on
-Linux desktops) so GNOME/KDE integrations can display native OSD/progress UI
-without owning gesture recognition or system actions.
+```toml
+width = 0.06
+```
+
+means that the outermost 6% of the physical trackpad is used as the gesture activation zone.
+
+`cancel_margin` adds extra inward tolerance once the gesture has started.
+
+A gesture begins only when a **new contact starts inside the edge zone**. Sliding an already active finger into the edge does not activate a gesture.
+
+## Actions
+
+### Brightness
+
+```toml
+[[actions]]
+id = "screen-brightness"
+type = "brightness"
+command = "brightnessctl"
+min = 0.05
+max = 1.0
+```
+
+Keeping a non-zero minimum can prevent accidentally reducing the screen to an unusably low brightness.
+
+### Volume
+
+```toml
+[[actions]]
+id = "speaker-volume"
+type = "volume"
+command = "wpctl"
+min = 0.0
+max = 1.0
+```
+
+The current backend controls:
+
+```text
+@DEFAULT_AUDIO_SINK@
+```
+
+### Debug action
+
+```toml
+[[actions]]
+id = "debug"
+type = "print"
+label = "edge debug"
+```
+
+Useful while creating new mappings because it does not modify system state.
+
+## Bindings
+
+Gestures and actions are intentionally independent.
+
+```toml
+[[bindings]]
+gesture = "right-edge"
+action = "screen-brightness"
+sensitivity = 1.20
+invert = false
+```
+
+`sensitivity` multiplies the gesture displacement before sending it to the action.
+
+Set:
+
+```toml
+invert = true
+```
+
+to reverse the direction.
+
+For example, swapping brightness and volume only requires changing the bindings. No recompilation is required.
+
+## CLI usage
+
+Show help:
+
+```bash
+trackpadd --help
+```
+
+### List devices
+
+```bash
+trackpadd devices
+```
+
+This should normally be the first command used when troubleshooting.
+
+### Monitor touch and gesture events
+
+```bash
+trackpadd monitor
+```
+
+With an explicit device:
+
+```bash
+trackpadd monitor --device /dev/input/eventX
+```
+
+### Dry-run
+
+```bash
+trackpadd run --dry-run
+```
+
+Dry-run recognizes gestures and calculates action deltas without invoking external brightness or volume commands.
+
+### Run
+
+```bash
+trackpadd run
+```
+
+Use a different configuration:
+
+```bash
+trackpadd run --config /path/to/config.toml
+```
+
+Use a specific touchpad:
+
+```bash
+trackpadd run --device /dev/input/eventX
+```
+
+If exactly one compatible touchpad exists, `trackpadd` selects it automatically.
+
+If multiple compatible devices exist, it intentionally refuses to guess and asks for an explicit `--device`.
+
+## systemd user service
+
+The service runs as the current desktop user.
+
+Manage it with:
+
+```bash
+systemctl --user status trackpadd.service
+
+systemctl --user restart trackpadd.service
+
+systemctl --user stop trackpadd.service
+
+systemctl --user start trackpadd.service
+```
+
+Follow logs:
+
+```bash
+journalctl --user -u trackpadd.service -f
+```
+
+The daemon should not normally run as root because actions such as `wpctl` need access to services belonging to the current desktop session.
+
+## Device permissions
+
+The packaged udev rule is:
+
+```udev
+ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"
+```
+
+It only matches input event nodes already classified as touchpads.
+
+On systemd/logind desktops, the `uaccess` tag allows the active local user to receive a dynamic ACL for the device.
+
+This is preferable to permanently adding a desktop user to the broad Linux `input` group.
+
+Check device classification:
+
+```bash
+udevadm info \
+  --query=property \
+  /dev/input/eventX \
+  | grep ID_INPUT_TOUCHPAD
+```
+
+Expected result:
+
+```text
+ID_INPUT_TOUCHPAD=1
+```
+
+Inspect permissions:
+
+```bash
+getfacl /dev/input/eventX
+```
+
+## Troubleshooting
+
+### `trackpadd: command not found`
+
+The default binary location is:
+
+```text
+~/.local/bin/trackpadd
+```
+
+For the current shell:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add the same configuration to your shell profile if necessary.
+
+### No compatible touchpad is readable
+
+Start with:
+
+```bash
+trackpadd devices
+```
+
+Then inspect the event device:
+
+```bash
+udevadm info \
+  --query=property \
+  /dev/input/eventX \
+  | grep ID_INPUT_TOUCHPAD
+
+getfacl /dev/input/eventX
+```
+
+Reload the udev rule if necessary:
+
+```bash
+sudo udevadm control --reload-rules
+
+sudo udevadm trigger \
+  --subsystem-match=input \
+  --action=change
+```
+
+If the desktop session still has stale ACL state, log out and log back in.
+
+### Multiple touchpads detected
+
+List them:
+
+```bash
+trackpadd devices
+```
+
+Then select one explicitly:
+
+```bash
+trackpadd run --device /dev/input/eventX
+```
+
+### Gesture detected but brightness does not change
+
+Test the backend independently:
+
+```bash
+brightnessctl -m
+
+brightnessctl set 50%
+```
+
+If these fail outside `trackpadd`, fix the brightness backend first.
+
+### Gesture detected but volume does not change
+
+Test:
+
+```bash
+wpctl get-volume @DEFAULT_AUDIO_SINK@
+
+wpctl set-volume @DEFAULT_AUDIO_SINK@ 50%
+```
+
+Also verify that PipeWire/WirePlumber is running in the same user session.
+
+### Service repeatedly fails
+
+Inspect:
+
+```bash
+systemctl --user status trackpadd.service
+
+journalctl \
+  --user \
+  -u trackpadd.service \
+  -b \
+  --no-pager
+```
+
+For interactive debugging:
+
+```bash
+systemctl --user stop trackpadd.service
+
+trackpadd run --dry-run
+```
+
+## Security model
+
+`trackpadd` intentionally avoids running the daemon as root.
+
+Administrative privileges are only needed during installation to place the udev rule under:
+
+```text
+/etc/udev/rules.d/
+```
+
+and reload udev.
+
+Runtime device access is delegated to the active desktop user through `uaccess`.
+
+Because Linux input devices contain sensitive interaction data, broad permanent access to the entire `input` group should be avoided when possible.
+
+Release archives should include a `SHA256SUMS` file. The provided release installer verifies the selected archive before installing it.
+
+## Development
+
+Run the complete development checks with:
+
+```bash
+cargo fmt --all -- --check \
+  && cargo clippy \
+       --workspace \
+       --all-targets \
+       --all-features \
+       -- \
+       -D warnings \
+  && cargo test --workspace
+```
+
+Build:
+
+```bash
+cargo build --release -p trackpadd
+```
+
+## Releases
+
+The project uses semantic version tags:
+
+```text
+v0.2.0
+v0.2.1
+v0.3.0
+```
+
+Before creating a release:
+
+```bash
+cargo fmt --all -- --check
+
+cargo clippy \
+  --workspace \
+  --all-targets \
+  --all-features \
+  -- \
+  -D warnings
+
+cargo test --workspace --locked
+```
+
+Commit the release:
+
+```bash
+git add .
+
+git commit -m "chore: prepare v0.2.0"
+
+git push origin main
+```
+
+Create an annotated tag:
+
+```bash
+git tag -a v0.2.0 -m "trackpadd v0.2.0"
+
+git push origin v0.2.0
+```
+
+Pushing a `v*.*.*` tag triggers the release workflow under:
+
+```text
+.github/workflows/release.yml
+```
+
+The workflow builds and publishes:
+
+```text
+trackpadd-x86_64-unknown-linux-musl.tar.gz
+trackpadd-aarch64-unknown-linux-musl.tar.gz
+SHA256SUMS
+```
+
+The installer then downloads the appropriate asset from the latest GitHub Release.
+
+## Roadmap
+
+Possible future work:
+
+* additional gesture recognizers;
+* persistent per-device selection;
+* GNOME/KDE OSD integration;
+* D-Bus integration;
+* more configurable action backends;
+* OpenRC/runit service adapters;
+* native RPM/DEB/Arch packages;
+* GUI configuration;
+* additional architectures.
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+Before opening a pull request, please run:
+
+```bash
+cargo fmt --all -- --check
+
+cargo clippy \
+  --workspace \
+  --all-targets \
+  --all-features \
+  -- \
+  -D warnings
+
+cargo test --workspace
+```
+
+Whenever possible, keep gesture recognition independent from desktop-specific integrations.
+
+## License
+
+Licensed under the MIT License.
+
+See [`LICENSE`](LICENSE).
