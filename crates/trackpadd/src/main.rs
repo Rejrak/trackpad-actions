@@ -386,6 +386,7 @@ fn monitor(device: PathBuf) -> Result<()> {
         0.06,
         0.04,
     ));
+    engine.add(EdgeSwipeRecognizer::new("top-edge", Edge::Top, 0.06, 0.04));
 
     loop {
         let frame = reader.next_frame()?;
@@ -430,6 +431,7 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                 let edge = match edge {
                     EdgeConfig::Left => Edge::Left,
                     EdgeConfig::Right => Edge::Right,
+                    EdgeConfig::Top => Edge::Top,
                 };
 
                 engine.add(EdgeSwipeRecognizer::new(id, edge, width, cancel_margin));
@@ -478,6 +480,8 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                     CommandDirectionConfig::Any => CommandDirection::Any,
                     CommandDirectionConfig::Up => CommandDirection::Up,
                     CommandDirectionConfig::Down => CommandDirection::Down,
+                    CommandDirectionConfig::Left => CommandDirection::Left,
+                    CommandDirectionConfig::Right => CommandDirection::Right,
                 };
                 let implementation =
                     CommandAction::new(id.clone(), command, args, trigger, direction, threshold)?;

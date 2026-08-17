@@ -214,6 +214,8 @@ pub enum CommandDirection {
     Any,
     Up,
     Down,
+    Left,
+    Right,
 }
 
 pub struct CommandAction {
@@ -262,8 +264,8 @@ impl CommandAction {
             CommandDirection::Any => {
                 self.max_delta >= self.threshold || self.min_delta <= -self.threshold
             }
-            CommandDirection::Up => self.max_delta >= self.threshold,
-            CommandDirection::Down => self.min_delta <= -self.threshold,
+            CommandDirection::Up | CommandDirection::Right => self.max_delta >= self.threshold,
+            CommandDirection::Down | CommandDirection::Left => self.min_delta <= -self.threshold,
         }
     }
 
@@ -410,6 +412,28 @@ mod tests {
     #[test]
     fn command_direction_down_requires_negative_threshold() {
         let mut action = action(CommandDirection::Down, 0.10);
+        action.min_delta = -0.11;
+        assert!(action.direction_matches());
+
+        action.min_delta = 0.0;
+        action.max_delta = 0.50;
+        assert!(!action.direction_matches());
+    }
+
+    #[test]
+    fn command_direction_right_uses_positive_threshold() {
+        let mut action = action(CommandDirection::Right, 0.10);
+        action.max_delta = 0.11;
+        assert!(action.direction_matches());
+
+        action.max_delta = 0.0;
+        action.min_delta = -0.50;
+        assert!(!action.direction_matches());
+    }
+
+    #[test]
+    fn command_direction_left_uses_negative_threshold() {
+        let mut action = action(CommandDirection::Left, 0.10);
         action.min_delta = -0.11;
         assert!(action.direction_matches());
 

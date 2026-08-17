@@ -247,6 +247,7 @@ impl GestureConfig {
 pub enum EdgeConfig {
     Left,
     Right,
+    Top,
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,6 +304,8 @@ pub enum CommandDirectionConfig {
     Any,
     Up,
     Down,
+    Left,
+    Right,
 }
 
 impl ActionConfig {
@@ -459,6 +462,30 @@ mod tests {
         assert!(selector.matches("Example Touchpad", 0x1234, 0xabcd));
         assert!(!selector.matches("Other Touchpad", 0x1234, 0xabcd));
         assert!(!selector.matches("Example Touchpad", 0x9999, 0xabcd));
+    }
+
+    #[test]
+    fn top_edge_gesture_config_parses() {
+        let config = parse(
+            r#"
+            [[gestures]]
+            id = "top-edge"
+            type = "edge-swipe"
+            edge = "top"
+            width = 0.06
+            cancel_margin = 0.04
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.gestures.as_slice(),
+            [GestureConfig::EdgeSwipe {
+                id,
+                edge: EdgeConfig::Top,
+                ..
+            }] if id == "top-edge"
+        ));
     }
 
     #[test]

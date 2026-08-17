@@ -390,7 +390,12 @@ cancel_margin = 0.04
 ```text
 left
 right
+top
 ```
+
+Left and right edges track vertical movement: positive delta means moving up.
+
+The top edge tracks horizontal movement: positive delta means moving right and negative delta means moving left.
 
 `width` controls the activation zone. For example:
 
@@ -398,11 +403,28 @@ right
 width = 0.06
 ```
 
-means that the outermost 6% of the physical trackpad is used as the gesture activation zone.
+means that the outermost 6% of the selected physical edge is used as the gesture activation zone.
+
+For `edge = "top"`, the same value describes the top 6% of the trackpad height, while the gesture displacement itself is measured horizontally.
 
 `cancel_margin` adds extra inward tolerance once the gesture has started.
 
 A gesture begins only when a **new contact starts inside the edge zone**. Sliding an already active finger into the edge does not activate a gesture.
+
+A horizontal top-edge swipe is configured with:
+
+```toml
+[[gestures]]
+id = "top-edge"
+type = "edge-swipe"
+edge = "top"
+width = 0.06
+cancel_margin = 0.04
+```
+
+It must start in the top activation band. Moving right produces a positive delta; moving left produces a negative delta. Moving too far downward after activation cancels the gesture.
+
+Command actions can distinguish the two directions with `direction = "right"` and `direction = "left"`.
 
 ## Actions
 

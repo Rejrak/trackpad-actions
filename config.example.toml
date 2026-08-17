@@ -30,6 +30,16 @@ edge = "left"
 width = 0.06
 cancel_margin = 0.04
 
+# Optional horizontal swipe that must start inside the top edge zone.
+# Positive delta means moving right; negative delta means moving left.
+#
+# [[gestures]]
+# id = "top-edge"
+# type = "edge-swipe"
+# edge = "top"
+# width = 0.06
+# cancel_margin = 0.04
+
 # MVP backend: brightnessctl. Keep a non-zero minimum while experimenting.
 [[actions]]
 id = "screen-brightness"
@@ -56,7 +66,7 @@ max = 1.0
 # The default trigger is "end": the command runs only when the gesture ends
 # normally and the transformed delta reaches `threshold` at least once.
 #
-# direction can be "any", "up", or "down". `sensitivity` and `invert` from the
+# direction can be "any", "up", "down", "left", or "right". `sensitivity` and `invert` from the
 # binding are applied before this threshold/direction check.
 #
 # [[actions]]
