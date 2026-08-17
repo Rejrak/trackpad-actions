@@ -479,13 +479,39 @@ Show help:
 trackpadd --help
 ```
 
-### List devices
+### Diagnose devices
 
 ```bash
 trackpadd devices
 ```
 
-This should normally be the first command used when troubleshooting.
+The default view focuses on touchpad-like candidates and explains why a device is accepted or rejected.
+
+Inspect every Linux input event node, including devices the current user cannot open:
+
+```bash
+trackpadd devices --all
+```
+
+Compare compatible devices with a persistent `[device]` selector:
+
+```bash
+trackpadd devices --config ~/.config/trackpadd/config.toml
+```
+
+The output includes compatibility reasons, multitouch axis coverage, coordinate ranges, slot count, suggested stable selectors, and an automatic/configured selection summary.
+
+### Validate configuration
+
+```bash
+trackpadd check-config
+```
+
+Validate another file without opening the touchpad or executing actions:
+
+```bash
+trackpadd check-config --config /path/to/config.toml
+```
 
 ### Monitor touch and gesture events
 

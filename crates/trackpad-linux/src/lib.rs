@@ -8,6 +8,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use evdev::{AbsInfo, AbsoluteAxisCode, Device, EventType, InputEvent, PropType};
 use trackpad_core::{Contact, TouchFrame};
 
+mod diagnostics;
+pub use diagnostics::{diagnose_devices, DeviceDiagnostic};
+
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub path: PathBuf,
@@ -106,7 +109,12 @@ fn describe_device(path: PathBuf, device: &Device) -> Result<DeviceInfo> {
         x_max: x.maximum(),
         y_min: y.minimum(),
         y_max: y.maximum(),
-        compatible: has_mt_axes && !direct && !semi_mt && slots > 0,
+        compatible: has_mt_axes
+            && !direct
+            && !semi_mt
+            && slots > 0
+            && x.maximum() > x.minimum()
+            && y.maximum() > y.minimum(),
     })
 }
 

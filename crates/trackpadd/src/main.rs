@@ -18,7 +18,8 @@ use config::{
 };
 use trackpad_core::{Edge, EdgeSwipeRecognizer, GestureEngine, GestureEvent, GesturePhase};
 use trackpad_linux::{
-    auto_select_touchpad, compatible_devices, list_devices, DeviceInfo, TouchpadReader,
+    auto_select_touchpad, compatible_devices, diagnose_devices, DeviceDiagnostic, DeviceInfo,
+    TouchpadReader,
 };
 
 #[derive(Debug, Parser)]
@@ -31,8 +32,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// List multitouch input devices visible to the current user.
-    Devices,
+    /// Diagnose Linux input devices and touchpad compatibility.
+    Devices {
+        /// Show every /dev/input/event* node, including non-touchpad and unreadable devices.
+        #[arg(long)]
+        all: bool,
+
+        /// Optional config path used to show which devices match [device].
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
 
     /// Create ~/.config/trackpadd/config.toml (or XDG_CONFIG_HOME equivalent).
     InitConfig {
@@ -75,7 +84,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Devices => devices(),
+        Commands::Devices { all, config } => devices(all, config),
         Commands::InitConfig { force } => init_config(force),
         Commands::CheckConfig { config } => check_config(resolve_config(config)?),
         Commands::Monitor { device } => monitor(resolve_device(device)?),
@@ -201,39 +210,162 @@ fn check_config(config_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn devices() -> Result<()> {
-    let devices = list_devices();
+fn devices(all: bool, config_path: Option<PathBuf>) -> Result<()> {
+    let selector = match config_path {
+        Some(path) => {
+            let path = resolve_config(Some(path))?;
+            AppConfig::load(&path)?.device
+        }
+        None => None,
+    };
 
-    if devices.is_empty() {
-        println!("No multitouch candidates are readable by the current user.");
-        println!(
-            "Install the trackpadd udev/uaccess rule or grant a temporary ACL for development."
-        );
+    let diagnostics = diagnose_devices()?;
+
+    if diagnostics.is_empty() {
+        println!("No /dev/input/event* devices were found.");
         return Ok(());
     }
 
-    for (index, device) in devices.iter().enumerate() {
-        println!("[{index}] {}", device.path.display());
-        println!("    name:       {}", device.name);
-        println!("    vendor:     {:04x}", device.vendor);
-        println!("    product:    {:04x}", device.product);
-        println!("    pointer:    {}", device.pointer);
-        println!("    direct:     {}", device.direct);
-        println!("    semi-mt:    {}", device.semi_mt);
-        println!("    slots:      {}", device.slots);
-        println!("    x range:    {}..{}", device.x_min, device.x_max);
-        println!("    y range:    {}..{}", device.y_min, device.y_max);
-        println!("    compatible: {}", device.compatible);
-        if device.compatible {
-            println!(
-                "    selector:   vendor=0x{:04x} product=0x{:04x}",
-                device.vendor, device.product
-            );
-        }
+    let visible = diagnostics
+        .iter()
+        .filter(|device| all || device.is_touch_candidate())
+        .collect::<Vec<_>>();
+
+    if visible.is_empty() {
+        println!("No touchpad candidates were found.");
+        println!("Use `trackpadd devices --all` to inspect every input event node.");
         println!();
     }
 
+    for (index, device) in visible.iter().enumerate() {
+        println!("[{index}] {}", device.path.display());
+
+        let status = if !device.readable {
+            "unreadable"
+        } else if device.compatible {
+            "compatible"
+        } else {
+            "rejected"
+        };
+
+        println!("    status:     {status}");
+        println!("    readable:   {}", device.readable);
+
+        if let Some(name) = &device.name {
+            println!("    name:       {name}");
+        }
+        if let Some(vendor) = device.vendor {
+            println!("    vendor:     {vendor:04x}");
+        }
+        if let Some(product) = device.product {
+            println!("    product:    {product:04x}");
+        }
+        if let Some(pointer) = device.pointer {
+            println!("    pointer:    {pointer}");
+        }
+        if let Some(direct) = device.direct {
+            println!("    direct:     {direct}");
+        }
+        if let Some(semi_mt) = device.semi_mt {
+            println!("    semi-mt:    {semi_mt}");
+        }
+
+        println!("    mt axes:    {}/4", device.required_mt_axes);
+
+        if let Some(slots) = device.slots {
+            println!("    slots:      {slots}");
+        }
+        if let Some((min, max)) = device.x_range {
+            println!("    x range:    {min}..{max}");
+        }
+        if let Some((min, max)) = device.y_range {
+            println!("    y range:    {min}..{max}");
+        }
+
+        println!("    compatible: {}", device.compatible);
+
+        if device.compatible {
+            if let (Some(vendor), Some(product)) = (device.vendor, device.product) {
+                println!("    selector:   vendor=0x{vendor:04x} product=0x{product:04x}");
+            }
+        }
+
+        if let Some(selector) = &selector {
+            println!(
+                "    config-match: {}",
+                diagnostic_matches_selector(device, selector)
+            );
+        }
+
+        if !device.issues.is_empty() {
+            println!("    issues:");
+            for issue in &device.issues {
+                println!("      - {issue}");
+            }
+        }
+
+        println!();
+    }
+
+    let compatible = diagnostics
+        .iter()
+        .filter(|device| device.compatible)
+        .collect::<Vec<_>>();
+    let rejected_candidates = diagnostics
+        .iter()
+        .filter(|device| device.readable && device.is_touch_candidate() && !device.compatible)
+        .count();
+    let unreadable = diagnostics.iter().filter(|device| !device.readable).count();
+
+    println!(
+        "Summary: {} compatible, {} rejected touch candidate(s), {} unreadable event node(s)",
+        compatible.len(),
+        rejected_candidates,
+        unreadable
+    );
+
+    if let Some(selector) = &selector {
+        let matches = compatible
+            .iter()
+            .filter(|device| diagnostic_matches_selector(device, selector))
+            .collect::<Vec<_>>();
+
+        println!("Configured selector: {}", selector.description());
+
+        match matches.as_slice() {
+            [] => println!("Configured selection: no compatible match"),
+            [device] => println!("Configured selection: {}", device.path.display()),
+            many => println!(
+                "Configured selection: ambiguous ({} compatible matches)",
+                many.len()
+            ),
+        }
+    } else {
+        match compatible.as_slice() {
+            [] => println!("Automatic selection: unavailable"),
+            [device] => println!("Automatic selection: {}", device.path.display()),
+            many => println!(
+                "Automatic selection: ambiguous ({} compatible devices)",
+                many.len()
+            ),
+        }
+    }
+
+    if !all {
+        let hidden = diagnostics.len().saturating_sub(visible.len());
+        if hidden > 0 {
+            println!("Hidden event nodes: {hidden}. Use `trackpadd devices --all` for the complete list.");
+        }
+    }
+
     Ok(())
+}
+
+fn diagnostic_matches_selector(device: &DeviceDiagnostic, selector: &DeviceConfig) -> bool {
+    match (device.name.as_deref(), device.vendor, device.product) {
+        (Some(name), Some(vendor), Some(product)) => selector.matches(name, vendor, product),
+        _ => false,
+    }
 }
 
 fn monitor(device: PathBuf) -> Result<()> {
