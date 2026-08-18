@@ -865,11 +865,11 @@ dependencies = [
 
 [[package]]
 name = "trackpad-core"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "trackpad-linux"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "evdev",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "trackpadd"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
