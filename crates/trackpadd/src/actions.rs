@@ -29,6 +29,17 @@ impl ActionValue {
         }
     }
 
+    fn percent_with_source(
+        kind: &'static str,
+        percent: u32,
+        max_percent: u32,
+        source: &str,
+    ) -> Self {
+        let mut value = Self::percent(kind, percent, max_percent);
+        value.source = source.to_string();
+        value
+    }
+
     fn media(position: f64, metadata: &MediaMetadata) -> Self {
         Self {
             kind: "media-position",
@@ -166,6 +177,7 @@ pub struct VolumeAction {
     max: f64,
     start_value: Option<f64>,
     last_sent_percent: Option<u32>,
+    source: String,
 }
 
 impl VolumeAction {
@@ -177,6 +189,7 @@ impl VolumeAction {
             max,
             start_value: None,
             last_sent_percent: None,
+            source: String::new(),
         })
     }
 
@@ -205,6 +218,23 @@ impl VolumeAction {
         Ok(value.clamp(0.0, 1.5))
     }
 
+    fn read_source(&self) -> String {
+        let output = match Command::new(&self.command)
+            .env("LC_ALL", "C")
+            .args(["inspect", "@DEFAULT_AUDIO_SINK@"])
+            .output()
+        {
+            Ok(output) if output.status.success() => output,
+            _ => return String::new(),
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        ["node.nick", "node.description", "node.name"]
+            .into_iter()
+            .find_map(|key| parse_wpctl_property(&stdout, key))
+            .unwrap_or_default()
+    }
+
     fn write_value(&mut self, value: f64) -> Result<Option<u32>> {
         let target = value.clamp(self.min, self.max);
         let percent = (target * 100.0).round() as u32;
@@ -230,7 +260,9 @@ impl VolumeAction {
 impl ContinuousAction for VolumeAction {
     fn begin(&mut self) -> Result<()> {
         let value = self.read_value()?;
+        let source = self.read_source();
         self.start_value = Some(value);
+        self.source = source;
         self.last_sent_percent = Some((value * 100.0).round() as u32);
         Ok(())
     }
@@ -241,20 +273,22 @@ impl ContinuousAction for VolumeAction {
             .ok_or_else(|| anyhow!("volume action updated before begin"))?;
         let target = (start + delta).clamp(self.min, self.max);
         let max_percent = (self.max * 100.0).round() as u32;
-        Ok(self
-            .write_value(target)?
-            .map(|percent| ActionValue::percent("volume", percent, max_percent)))
+        Ok(self.write_value(target)?.map(|percent| {
+            ActionValue::percent_with_source("volume", percent, max_percent, &self.source)
+        }))
     }
 
     fn finish(&mut self) -> Result<Option<ActionValue>> {
         self.start_value = None;
         self.last_sent_percent = None;
+        self.source.clear();
         Ok(None)
     }
 
     fn cancel(&mut self) -> Result<()> {
         self.start_value = None;
         self.last_sent_percent = None;
+        self.source.clear();
         Ok(())
     }
 }
@@ -625,6 +659,27 @@ impl ContinuousAction for PrintAction {
     }
 }
 
+fn parse_wpctl_property(raw: &str, key: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        let line = line.trim();
+        let line = line.strip_prefix('*').unwrap_or(line).trim();
+        let (name, value) = line.split_once('=')?;
+
+        if name.trim() != key {
+            return None;
+        }
+
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(value);
+        let value = normalize_metadata_text(value);
+
+        (!value.is_empty()).then_some(value)
+    })
+}
+
 fn parse_mpris_length(raw: &str) -> Option<f64> {
     let microseconds = raw.trim().parse::<f64>().ok()?;
     if !microseconds.is_finite() || microseconds <= 0.0 {
@@ -786,6 +841,38 @@ mod tests {
         let unknown = ActionValue::media(12.0, &MediaMetadata::default());
         assert_eq!(unknown.max_value, 0.0);
         assert!(unknown.source.is_empty());
+    }
+
+    #[test]
+    fn wpctl_property_parser_extracts_human_facing_names() {
+        let inspect = r#"
+            id 42, type PipeWire:Interface:Node/3
+              * node.name = "alsa_output.pci-0000_00_1f.3.analog-stereo"
+              * node.nick = "Speakers"
+                node.description = "Built-in Audio Analog Stereo"
+        "#;
+
+        assert_eq!(
+            parse_wpctl_property(inspect, "node.nick").as_deref(),
+            Some("Speakers")
+        );
+        assert_eq!(
+            parse_wpctl_property(inspect, "node.description").as_deref(),
+            Some("Built-in Audio Analog Stereo")
+        );
+        assert_eq!(parse_wpctl_property(inspect, "missing"), None);
+    }
+
+    #[test]
+    fn sourced_percent_value_keeps_audio_output_context() {
+        let value = ActionValue::percent_with_source("volume", 42, 100, "Speakers");
+
+        assert_eq!(value.kind, "volume");
+        assert_eq!(value.value, 42.0);
+        assert_eq!(value.max_value, 100.0);
+        assert_eq!(value.source, "Speakers");
+        assert!(value.title.is_empty());
+        assert!(value.artist.is_empty());
     }
 
     #[test]

@@ -414,6 +414,11 @@ The current backend controls:
 @DEFAULT_AUDIO_SINK@
 ```
 
+At gesture start it also performs a best-effort `wpctl inspect` of that sink.
+For desktop feedback it prefers PipeWire's short `node.nick`, then the
+human-readable `node.description`, and finally `node.name`. Failure to inspect
+the sink never blocks volume changes.
+
 ### Media seek
 
 Continuous media scrubbing uses `playerctl`, which controls MPRIS-compatible players:
@@ -561,8 +566,10 @@ player exposes `mpris:length`; `0` means that no maximum is currently known.
 
 `source`, `title`, and `artist` are optional textual context fields. The
 `media-seek` backend fills them from playerctl's `playerName`, `xesam:title`,
-and `xesam:artist` metadata when available. Other action types currently leave
-them empty, so desktop adapters can remain generic without inventing metadata.
+and `xesam:artist` metadata when available. The volume backend uses `source`
+for the current PipeWire output name when WirePlumber exposes one; `title` and
+`artist` remain empty. Desktop adapters can therefore stay generic without
+inventing metadata.
 
 Watch these events from another terminal with:
 
@@ -601,11 +608,12 @@ Inspect its state:
 gnome-extensions info trackpadd-osd@rejrak.github.io
 ```
 
-Brightness and volume use the native icon, label and level bar. Media seeking
-shows available player/title/artist context together with the current and total
-clock position, plus a native progress bar when the player exposes
-`mpris:length`. Missing metadata degrades independently: for example a browser
-may expose a player name and title but no artist or duration.
+Brightness uses the native icon, label and level bar. Volume additionally
+uses the current PipeWire output name when available, so the GNOME OSD can show
+labels such as `Speakers` or a headset/device name instead of the generic
+`Volume`. Media seeking shows available player/title/artist context together
+with the current and total clock position, plus a native progress bar when the
+player exposes `mpris:length`. Missing metadata degrades independently.
 
 The adapter is intentionally GNOME-specific while the daemon's D-Bus event
 contract remains desktop-neutral. Other desktop environments can implement

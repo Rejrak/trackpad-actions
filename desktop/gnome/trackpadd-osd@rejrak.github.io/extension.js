@@ -125,9 +125,10 @@ export default class TrackpaddNativeOsdExtension extends Extension {
         case 'volume:percent': {
             const rawLevel = Math.max(0, value / 100);
             const maximum = maxValue > 0 ? maxValue : 100;
+            const label = source ? truncate(source, 32) : 'Volume';
             this._show(
                 volumeIcon(rawLevel),
-                'Volume',
+                label,
                 clamp(value / maximum, 0, 1),
                 1
             );

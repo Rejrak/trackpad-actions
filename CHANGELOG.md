@@ -17,6 +17,8 @@ All notable changes to `trackpadd` are documented in this file.
 - Media player, title, and artist context from playerctl/MPRIS in
   `ActionValueChanged`, with native GNOME OSD labels and graceful fallback when
   metadata fields are absent.
+- Current PipeWire output context for volume events, allowing the native GNOME
+  OSD to display the active sink name while preserving a generic fallback.
 
 ## [0.2.0] - 2026-08-18
 
