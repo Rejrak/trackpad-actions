@@ -4,6 +4,8 @@ All notable changes to `trackpadd` are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-18
+
 ### Added
 
 - Read-only daemon status over the user D-Bus session bus.
@@ -19,6 +21,13 @@ All notable changes to `trackpadd` are documented in this file.
   metadata fields are absent.
 - Current PipeWire output context for volume events, allowing the native GNOME
   OSD to display the active sink name while preserving a generic fallback.
+
+### Changed
+
+- The source installer now builds against the checked-in `Cargo.lock` and
+  restarts an already-enabled user service after installing a new daemon binary.
+- The v0.3 user-session D-Bus interface and `ActionValueChanged` payload are
+  documented as the stable `io.github.Rejrak.Trackpadd1` protocol generation.
 
 ## [0.2.0] - 2026-08-18
 

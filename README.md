@@ -160,10 +160,11 @@ cd trackpad-actions
 ./scripts/install-local.sh
 ```
 
-The source installer builds the release binary locally, installs it to
-`~/.local/bin/trackpadd`, preserves an existing user configuration, installs
-the systemd user service and the restricted `udev/uaccess` rule, reloads udev,
-and enables the service.
+The source installer builds the release binary using the checked-in
+`Cargo.lock`, installs it to `~/.local/bin/trackpadd`, preserves an existing
+user configuration, installs the systemd user service and the restricted
+`udev/uaccess` rule, reloads udev, enables the service, and restarts it so an
+upgrade immediately runs the newly installed binary.
 
 To uninstall the locally installed daemon:
 
@@ -194,7 +195,7 @@ cargo --version
 Run tests:
 
 ```bash
-cargo test --workspace
+cargo test --workspace --locked
 ```
 
 Run formatting checks:
@@ -210,6 +211,7 @@ cargo clippy \
   --workspace \
   --all-targets \
   --all-features \
+  --locked \
   -- \
   -D warnings
 ```
@@ -217,7 +219,7 @@ cargo clippy \
 Build the optimized daemon:
 
 ```bash
-cargo build --release -p trackpadd
+cargo build --release --locked -p trackpadd
 ```
 
 The executable will be:
@@ -535,13 +537,27 @@ trackpadd status
 The command reports the running daemon version, selected input device, active
 configuration path, and whether the daemon is running in dry-run mode.
 
-The initial v0.3 D-Bus API uses:
+The v0.3 D-Bus contract uses:
 
 ```text
 service:   io.github.Rejrak.Trackpadd
 path:      /io/github/Rejrak/Trackpadd
 interface: io.github.Rejrak.Trackpadd1
 ```
+
+The read-only status methods are:
+
+```text
+Ping()       -> string
+Version()    -> string
+DevicePath() -> string
+ConfigPath() -> string
+DryRun()     -> boolean
+```
+
+For the 0.3.x release line, `io.github.Rejrak.Trackpadd1` and the signal body
+below are treated as stable. A future incompatible protocol change should use
+a new interface generation instead of silently changing `Trackpadd1`.
 
 D-Bus setup is best-effort: failure to connect to the session bus does not stop
 gesture processing. In that case `trackpadd status` is unavailable.
@@ -550,6 +566,7 @@ Action backends that expose continuous values also emit:
 
 ```text
 ActionValueChanged(action_id, kind, value, max_value, unit, (source, title, artist))
+D-Bus body signature: ssdds(sss)
 ```
 
 Current value kinds are:
@@ -643,7 +660,9 @@ trackpadd monitor --device /dev/input/eventX
 trackpadd run --dry-run
 ```
 
-Dry-run recognizes gestures and calculates action deltas without invoking external brightness or volume commands.
+Dry-run recognizes gestures and calculates action deltas without invoking
+configured action backends. Because action backends are skipped,
+`ActionValueChanged` events are not emitted in dry-run mode.
 
 ### Run
 
