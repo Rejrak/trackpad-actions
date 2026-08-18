@@ -8,6 +8,8 @@ All notable changes to `trackpadd` are documented in this file.
 
 - Read-only daemon status over the user D-Bus session bus.
 - `trackpadd status` for querying the running daemon without opening evdev.
+- D-Bus `ActionValueChanged` events for brightness, volume, and media position.
+- `trackpadd watch` for observing daemon action-value events.
 
 ## [0.2.0] - 2026-08-18
 

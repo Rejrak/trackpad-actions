@@ -520,6 +520,30 @@ interface: io.github.Rejrak.Trackpadd1
 D-Bus setup is best-effort: failure to connect to the session bus does not stop
 gesture processing. In that case `trackpadd status` is unavailable.
 
+Action backends that expose continuous values also emit:
+
+```text
+ActionValueChanged(action_id, kind, value, unit)
+```
+
+Current value kinds are:
+
+```text
+brightness      percent
+volume          percent
+media-position  seconds
+```
+
+Watch these events from another terminal with:
+
+```bash
+trackpadd watch
+```
+
+This event stream is intended as the integration point for desktop OSDs and
+other lightweight consumers. IPC failures remain best-effort and never turn a
+successful gesture action into an action failure.
+
 ### Monitor touch and gesture events
 
 ```bash

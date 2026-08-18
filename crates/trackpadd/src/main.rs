@@ -8,8 +8,8 @@ use std::{
 };
 
 use actions::{
-    BrightnessAction, CommandAction, CommandDirection, CommandTrigger, ContinuousAction,
-    MediaSeekAction, PrintAction, VolumeAction,
+    ActionValue, BrightnessAction, CommandAction, CommandDirection, CommandTrigger,
+    ContinuousAction, MediaSeekAction, PrintAction, VolumeAction,
 };
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -62,6 +62,9 @@ enum Commands {
     /// Query the running daemon over D-Bus without opening the touchpad.
     Status,
 
+    /// Watch action value changes emitted by the running daemon over D-Bus.
+    Watch,
+
     /// Print normalized touch contacts and edge gesture events.
     Monitor {
         /// Explicit evdev path. If omitted, auto-select when exactly one compatible touchpad exists.
@@ -93,6 +96,7 @@ fn main() -> Result<()> {
         Commands::InitConfig { force } => init_config(force),
         Commands::CheckConfig { config } => check_config(resolve_config(config)?),
         Commands::Status => status(),
+        Commands::Watch => ipc::watch_action_values(),
         Commands::Monitor { device } => monitor(resolve_device(device)?),
         Commands::Run {
             device,
@@ -597,15 +601,35 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                     continue;
                 };
 
-                if let Err(error) = dispatch_action(action.as_mut(), binding, &event) {
-                    eprintln!(
-                        "ACTION ERROR phase={:?} action='{}' gesture='{}': {error:#}",
-                        event.phase, binding.action, binding.gesture
-                    );
-                    let _ = action.cancel();
+                match dispatch_action(action.as_mut(), binding, &event) {
+                    Ok(Some(value)) => {
+                        print_action_value(binding, &value);
 
-                    if !matches!(event.phase, GesturePhase::Ended | GesturePhase::Cancelled) {
-                        failed_bindings.insert(key);
+                        if let Some(ipc_server) = &_ipc_server {
+                            if let Err(error) = ipc_server.emit_action_value(
+                                &binding.action,
+                                value.kind,
+                                value.value,
+                                value.unit,
+                            ) {
+                                eprintln!(
+                                    "IPC WARNING: failed to emit action value for '{}': {error:#}",
+                                    binding.action
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "ACTION ERROR phase={:?} action='{}' gesture='{}': {error:#}",
+                            event.phase, binding.action, binding.gesture
+                        );
+                        let _ = action.cancel();
+
+                        if !matches!(event.phase, GesturePhase::Ended | GesturePhase::Cancelled) {
+                            failed_bindings.insert(key);
+                        }
                     }
                 }
             }
@@ -617,24 +641,30 @@ fn dispatch_action(
     action: &mut dyn ContinuousAction,
     binding: &BindingConfig,
     event: &GestureEvent,
-) -> Result<()> {
+) -> Result<Option<ActionValue>> {
     match event.phase {
-        GesturePhase::Started => action.begin(),
+        GesturePhase::Started => {
+            action.begin()?;
+            Ok(None)
+        }
         GesturePhase::Updated => {
             let sign = if binding.invert { -1.0 } else { 1.0 };
             let delta = event.delta * binding.sensitivity * sign;
-            if let Some(value) = action.update(delta)? {
-                println!(
-                    "VALUE action={} value={:.0}%",
-                    binding.action,
-                    value * 100.0
-                );
-            }
-            Ok(())
+            action.update(delta)
         }
         GesturePhase::Ended => action.finish(),
-        GesturePhase::Cancelled => action.cancel(),
+        GesturePhase::Cancelled => {
+            action.cancel()?;
+            Ok(None)
+        }
     }
+}
+
+fn print_action_value(binding: &BindingConfig, value: &ActionValue) {
+    println!(
+        "VALUE action={} kind={} value={:.3} unit={}",
+        binding.action, value.kind, value.value, value.unit
+    );
 }
 
 fn print_gesture(event: &GestureEvent) {

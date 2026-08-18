@@ -5,10 +5,35 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionValue {
+    pub kind: &'static str,
+    pub value: f64,
+    pub unit: &'static str,
+}
+
+impl ActionValue {
+    fn percent(kind: &'static str, percent: u32) -> Self {
+        Self {
+            kind,
+            value: f64::from(percent),
+            unit: "percent",
+        }
+    }
+
+    fn seconds(position: f64) -> Self {
+        Self {
+            kind: "media-position",
+            value: position,
+            unit: "seconds",
+        }
+    }
+}
+
 pub trait ContinuousAction: Send {
     fn begin(&mut self) -> Result<()>;
-    fn update(&mut self, delta: f64) -> Result<Option<f64>>;
-    fn finish(&mut self) -> Result<()>;
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>>;
+    fn finish(&mut self) -> Result<Option<ActionValue>>;
     fn cancel(&mut self) -> Result<()>;
 }
 
@@ -62,10 +87,10 @@ impl BrightnessAction {
         Ok((percentage / 100.0).clamp(0.0, 1.0))
     }
 
-    fn write_value(&mut self, value: f64) -> Result<()> {
+    fn write_value(&mut self, value: f64) -> Result<Option<u32>> {
         let percent = (value.clamp(self.min, self.max) * 100.0).round() as u32;
         if self.last_sent_percent == Some(percent) {
-            return Ok(());
+            return Ok(None);
         }
 
         let value = format!("{percent}%");
@@ -79,7 +104,7 @@ impl BrightnessAction {
         }
 
         self.last_sent_percent = Some(percent);
-        Ok(())
+        Ok(Some(percent))
     }
 }
 
@@ -91,23 +116,26 @@ impl ContinuousAction for BrightnessAction {
         Ok(())
     }
 
-    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>> {
         let start = self
             .start_value
             .ok_or_else(|| anyhow!("brightness action updated before begin"))?;
         let target = (start + delta).clamp(self.min, self.max);
-        self.write_value(target)?;
-        Ok(Some(target))
+        Ok(self
+            .write_value(target)?
+            .map(|percent| ActionValue::percent("brightness", percent)))
     }
 
-    fn finish(&mut self) -> Result<()> {
+    fn finish(&mut self) -> Result<Option<ActionValue>> {
         self.start_value = None;
         self.last_sent_percent = None;
-        Ok(())
+        Ok(None)
     }
 
     fn cancel(&mut self) -> Result<()> {
-        self.finish()
+        self.start_value = None;
+        self.last_sent_percent = None;
+        Ok(())
     }
 }
 
@@ -156,11 +184,11 @@ impl VolumeAction {
         Ok(value.clamp(0.0, 1.5))
     }
 
-    fn write_value(&mut self, value: f64) -> Result<()> {
+    fn write_value(&mut self, value: f64) -> Result<Option<u32>> {
         let target = value.clamp(self.min, self.max);
         let percent = (target * 100.0).round() as u32;
         if self.last_sent_percent == Some(percent) {
-            return Ok(());
+            return Ok(None);
         }
 
         let value = format!("{percent}%");
@@ -174,7 +202,7 @@ impl VolumeAction {
         }
 
         self.last_sent_percent = Some(percent);
-        Ok(())
+        Ok(Some(percent))
     }
 }
 
@@ -186,23 +214,26 @@ impl ContinuousAction for VolumeAction {
         Ok(())
     }
 
-    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>> {
         let start = self
             .start_value
             .ok_or_else(|| anyhow!("volume action updated before begin"))?;
         let target = (start + delta).clamp(self.min, self.max);
-        self.write_value(target)?;
-        Ok(Some(target))
+        Ok(self
+            .write_value(target)?
+            .map(|percent| ActionValue::percent("volume", percent)))
     }
 
-    fn finish(&mut self) -> Result<()> {
+    fn finish(&mut self) -> Result<Option<ActionValue>> {
         self.start_value = None;
         self.last_sent_percent = None;
-        Ok(())
+        Ok(None)
     }
 
     fn cancel(&mut self) -> Result<()> {
-        self.finish()
+        self.start_value = None;
+        self.last_sent_percent = None;
+        Ok(())
     }
 }
 
@@ -309,12 +340,12 @@ impl MediaSeekAction {
         }
     }
 
-    fn write_position(&mut self, position: f64) -> Result<()> {
+    fn write_position(&mut self, position: f64) -> Result<bool> {
         if self
             .last_sent_position
             .is_some_and(|last| (last - position).abs() < 0.05)
         {
-            return Ok(());
+            return Ok(false);
         }
 
         let position_arg = format!("{position:.3}");
@@ -329,7 +360,7 @@ impl MediaSeekAction {
         }
 
         self.last_sent_position = Some(position);
-        Ok(())
+        Ok(true)
     }
 
     fn reset(&mut self) {
@@ -349,7 +380,7 @@ impl ContinuousAction for MediaSeekAction {
         Ok(())
     }
 
-    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>> {
         self.last_delta = delta;
 
         if !self.should_update() {
@@ -357,19 +388,23 @@ impl ContinuousAction for MediaSeekAction {
         }
 
         let target = self.target_position(delta)?;
-        self.write_position(target)?;
+        let changed = self.write_position(target)?;
         self.last_update = Some(Instant::now());
-        Ok(None)
+
+        Ok(changed.then(|| ActionValue::seconds(target)))
     }
 
-    fn finish(&mut self) -> Result<()> {
-        if self.start_position.is_some() {
+    fn finish(&mut self) -> Result<Option<ActionValue>> {
+        let update = if self.start_position.is_some() {
             let target = self.target_position(self.last_delta)?;
-            self.write_position(target)?;
-        }
+            self.write_position(target)?
+                .then(|| ActionValue::seconds(target))
+        } else {
+            None
+        };
 
         self.reset();
-        Ok(())
+        Ok(update)
     }
 
     fn cancel(&mut self) -> Result<()> {
@@ -490,19 +525,19 @@ impl ContinuousAction for CommandAction {
         Ok(())
     }
 
-    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>> {
         self.max_delta = self.max_delta.max(delta);
         self.min_delta = self.min_delta.min(delta);
         Ok(None)
     }
 
-    fn finish(&mut self) -> Result<()> {
+    fn finish(&mut self) -> Result<Option<ActionValue>> {
         if self.trigger == CommandTrigger::End && self.direction_matches() {
             self.spawn_command()?;
         }
 
         self.reset();
-        Ok(())
+        Ok(None)
     }
 
     fn cancel(&mut self) -> Result<()> {
@@ -527,14 +562,14 @@ impl ContinuousAction for PrintAction {
         Ok(())
     }
 
-    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+    fn update(&mut self, delta: f64) -> Result<Option<ActionValue>> {
         println!("ACTION {} delta={delta:+.3}", self.label);
         Ok(None)
     }
 
-    fn finish(&mut self) -> Result<()> {
+    fn finish(&mut self) -> Result<Option<ActionValue>> {
         println!("ACTION {} ended", self.label);
-        Ok(())
+        Ok(None)
     }
 
     fn cancel(&mut self) -> Result<()> {
@@ -643,5 +678,18 @@ mod tests {
         assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 0, 0.025, 1.4).is_err());
         assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.5, 1.4).is_err());
         assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 0.0).is_err());
+    }
+
+    #[test]
+    fn action_values_expose_explicit_units() {
+        let brightness = ActionValue::percent("brightness", 73);
+        assert_eq!(brightness.kind, "brightness");
+        assert_eq!(brightness.value, 73.0);
+        assert_eq!(brightness.unit, "percent");
+
+        let media = ActionValue::seconds(123.456);
+        assert_eq!(media.kind, "media-position");
+        assert_eq!(media.value, 123.456);
+        assert_eq!(media.unit, "seconds");
     }
 }

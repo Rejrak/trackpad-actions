@@ -9,6 +9,7 @@ use zbus::{
 pub const SERVICE_NAME: &str = "io.github.Rejrak.Trackpadd";
 pub const OBJECT_PATH: &str = "/io/github/Rejrak/Trackpadd";
 pub const INTERFACE_NAME: &str = "io.github.Rejrak.Trackpadd1";
+pub const ACTION_VALUE_CHANGED_SIGNAL: &str = "ActionValueChanged";
 
 struct DaemonInterface {
     version: String,
@@ -38,10 +39,39 @@ impl DaemonInterface {
     fn dry_run(&self) -> bool {
         self.dry_run
     }
+
+    #[zbus(signal)]
+    async fn action_value_changed(
+        signal_emitter: &zbus::object_server::SignalEmitter<'_>,
+        action_id: &str,
+        kind: &str,
+        value: f64,
+        unit: &str,
+    ) -> zbus::Result<()>;
 }
 
 pub struct IpcServer {
-    _connection: Connection,
+    connection: Connection,
+}
+
+impl IpcServer {
+    pub fn emit_action_value(
+        &self,
+        action_id: &str,
+        kind: &str,
+        value: f64,
+        unit: &str,
+    ) -> Result<()> {
+        self.connection
+            .emit_signal(
+                None::<&str>,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                ACTION_VALUE_CHANGED_SIGNAL,
+                &(action_id, kind, value, unit),
+            )
+            .context("failed to emit ActionValueChanged D-Bus signal")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,9 +99,7 @@ pub fn start_server(device: &Path, config: &Path, dry_run: bool) -> Result<IpcSe
         .build()
         .context("failed to start the trackpadd D-Bus service")?;
 
-    Ok(IpcServer {
-        _connection: connection,
-    })
+    Ok(IpcServer { connection })
 }
 
 pub fn query_status() -> Result<DaemonStatus> {
@@ -102,6 +130,34 @@ pub fn query_status() -> Result<DaemonStatus> {
     })
 }
 
+pub fn watch_action_values() -> Result<()> {
+    let connection = Connection::session().context("failed to connect to the D-Bus session bus")?;
+    let proxy = Proxy::new(&connection, SERVICE_NAME, OBJECT_PATH, INTERFACE_NAME)
+        .context("failed to create the trackpadd D-Bus proxy")?;
+    let signals = proxy
+        .receive_signal(ACTION_VALUE_CHANGED_SIGNAL)
+        .context("failed to subscribe to ActionValueChanged")?;
+
+    println!(
+        "Watching {} action values. Press Ctrl+C to stop.",
+        SERVICE_NAME
+    );
+
+    for message in signals {
+        let (action_id, kind, value, unit): (String, String, f64, String) = message
+            .body()
+            .deserialize()
+            .context("failed to decode ActionValueChanged")?;
+
+        println!(
+            "ACTION VALUE action={} kind={} value={value:.3} unit={}",
+            action_id, kind, unit
+        );
+    }
+
+    bail!("trackpadd D-Bus action-value stream ended")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +167,6 @@ mod tests {
         assert_eq!(SERVICE_NAME, "io.github.Rejrak.Trackpadd");
         assert_eq!(OBJECT_PATH, "/io/github/Rejrak/Trackpadd");
         assert_eq!(INTERFACE_NAME, "io.github.Rejrak.Trackpadd1");
+        assert_eq!(ACTION_VALUE_CHANGED_SIGNAL, "ActionValueChanged");
     }
 }
