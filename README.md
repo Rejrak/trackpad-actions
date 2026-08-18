@@ -435,11 +435,12 @@ provides more precision near the starting point and progressively accelerates
 larger movements. Updates are rate-limited by `update_interval_ms`.
 
 The action reads the current media position when the gesture starts, then seeks
-relative to that starting position. It also reads the optional MPRIS
-`mpris:length` metadata once at gesture start. When available, that duration is
-used to clamp seeking to the end of the media and is exposed to desktop adapters.
-Players or streams that do not support MPRIS seeking may reject the operation;
-players that omit `mpris:length` continue to work without duration-aware UI.
+relative to that starting position. It also reads optional MPRIS/playerctl
+metadata once at gesture start: total duration (`mpris:length`), player name,
+title, and artist. Duration is used to clamp seeking to the end of the media,
+while the text metadata is exposed to desktop adapters. Players or streams that
+do not support MPRIS seeking may reject the operation; missing metadata is
+non-fatal and simply produces a less detailed UI.
 
 ### Debug action
 
@@ -543,7 +544,7 @@ gesture processing. In that case `trackpadd status` is unavailable.
 Action backends that expose continuous values also emit:
 
 ```text
-ActionValueChanged(action_id, kind, value, max_value, unit)
+ActionValueChanged(action_id, kind, value, max_value, unit, (source, title, artist))
 ```
 
 Current value kinds are:
@@ -557,6 +558,11 @@ media-position  seconds
 `max_value` is the configured percentage ceiling for brightness/volume. For
 `media-position`, it is the total media duration in seconds when the active
 player exposes `mpris:length`; `0` means that no maximum is currently known.
+
+`source`, `title`, and `artist` are optional textual context fields. The
+`media-seek` backend fills them from playerctl's `playerName`, `xesam:title`,
+and `xesam:artist` metadata when available. Other action types currently leave
+them empty, so desktop adapters can remain generic without inventing metadata.
 
 Watch these events from another terminal with:
 
@@ -596,9 +602,10 @@ gnome-extensions info trackpadd-osd@rejrak.github.io
 ```
 
 Brightness and volume use the native icon, label and level bar. Media seeking
-shows the current and total clock position plus a native progress bar when the
-player exposes `mpris:length`. If the duration is unavailable, the same OSD
-falls back to the current clock position without a bar.
+shows available player/title/artist context together with the current and total
+clock position, plus a native progress bar when the player exposes
+`mpris:length`. Missing metadata degrades independently: for example a browser
+may expose a player name and title but no artist or duration.
 
 The adapter is intentionally GNOME-specific while the daemon's D-Bus event
 contract remains desktop-neutral. Other desktop environments can implement

@@ -612,6 +612,7 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                                 value.value,
                                 value.max_value,
                                 value.unit,
+                                (&value.source, &value.title, &value.artist),
                             ) {
                                 eprintln!(
                                     "IPC WARNING: failed to emit action value for '{}': {error:#}",
@@ -663,8 +664,15 @@ fn dispatch_action(
 
 fn print_action_value(binding: &BindingConfig, value: &ActionValue) {
     println!(
-        "VALUE action={} kind={} value={:.3} max={:.3} unit={}",
-        binding.action, value.kind, value.value, value.max_value, value.unit
+        "VALUE action={} kind={} value={:.3} max={:.3} unit={} source={:?} title={:?} artist={:?}",
+        binding.action,
+        value.kind,
+        value.value,
+        value.max_value,
+        value.unit,
+        value.source,
+        value.title,
+        value.artist
     );
 }
 

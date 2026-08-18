@@ -14,6 +14,9 @@ All notable changes to `trackpadd` are documented in this file.
 - Helper scripts for installing and removing the GNOME Shell integration.
 - Media duration propagation from MPRIS `mpris:length` through D-Bus to the
   native GNOME OSD, including a real seek progress bar when duration is known.
+- Media player, title, and artist context from playerctl/MPRIS in
+  `ActionValueChanged`, with native GNOME OSD labels and graceful fallback when
+  metadata fields are absent.
 
 ## [0.2.0] - 2026-08-18
 

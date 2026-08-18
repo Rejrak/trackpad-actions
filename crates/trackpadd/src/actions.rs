@@ -11,6 +11,9 @@ pub struct ActionValue {
     pub value: f64,
     pub max_value: f64,
     pub unit: &'static str,
+    pub source: String,
+    pub title: String,
+    pub artist: String,
 }
 
 impl ActionValue {
@@ -20,17 +23,31 @@ impl ActionValue {
             value: f64::from(percent),
             max_value: f64::from(max_percent),
             unit: "percent",
+            source: String::new(),
+            title: String::new(),
+            artist: String::new(),
         }
     }
 
-    fn seconds(position: f64, duration: Option<f64>) -> Self {
+    fn media(position: f64, metadata: &MediaMetadata) -> Self {
         Self {
             kind: "media-position",
             value: position,
-            max_value: duration.unwrap_or(0.0),
+            max_value: metadata.duration.unwrap_or(0.0),
             unit: "seconds",
+            source: metadata.player_name.clone(),
+            title: metadata.title.clone(),
+            artist: metadata.artist.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct MediaMetadata {
+    duration: Option<f64>,
+    player_name: String,
+    title: String,
+    artist: String,
 }
 
 pub trait ContinuousAction: Send {
@@ -249,7 +266,7 @@ pub struct MediaSeekAction {
     deadzone: f64,
     curve: f64,
     start_position: Option<f64>,
-    duration: Option<f64>,
+    metadata: MediaMetadata,
     last_delta: f64,
     last_update: Option<Instant>,
     last_sent_position: Option<f64>,
@@ -286,7 +303,7 @@ impl MediaSeekAction {
             deadzone,
             curve,
             start_position: None,
-            duration: None,
+            metadata: MediaMetadata::default(),
             last_delta: 0.0,
             last_update: None,
             last_sent_position: None,
@@ -322,18 +339,20 @@ impl MediaSeekAction {
         Ok(position)
     }
 
-    fn read_duration(&self) -> Option<f64> {
-        let output = Command::new(&self.command)
+    fn read_metadata(&self) -> MediaMetadata {
+        const SEPARATOR: char = '\u{1f}';
+        const FORMAT: &str = "{{mpris:length}}\u{1f}{{playerName}}\u{1f}{{title}}\u{1f}{{artist}}";
+
+        let output = match Command::new(&self.command)
             .env("LC_ALL", "C")
-            .args(["metadata", "--format", "{{mpris:length}}"])
+            .args(["metadata", "--format", FORMAT])
             .output()
-            .ok()?;
+        {
+            Ok(output) if output.status.success() => output,
+            _ => return MediaMetadata::default(),
+        };
 
-        if !output.status.success() {
-            return None;
-        }
-
-        parse_mpris_length(&String::from_utf8_lossy(&output.stdout))
+        parse_media_metadata(&String::from_utf8_lossy(&output.stdout), SEPARATOR)
     }
 
     fn shaped_delta(&self, delta: f64) -> f64 {
@@ -353,7 +372,7 @@ impl MediaSeekAction {
         let offset = self.shaped_delta(delta) * self.seconds_per_full_swipe;
         let target = (start + offset).max(0.0);
 
-        Ok(match self.duration {
+        Ok(match self.metadata.duration {
             Some(duration) => target.min(duration),
             None => target,
         })
@@ -391,7 +410,7 @@ impl MediaSeekAction {
 
     fn reset(&mut self) {
         self.start_position = None;
-        self.duration = None;
+        self.metadata = MediaMetadata::default();
         self.last_delta = 0.0;
         self.last_update = None;
         self.last_sent_position = None;
@@ -403,7 +422,7 @@ impl ContinuousAction for MediaSeekAction {
         self.reset();
         let position = self.read_position()?;
         self.start_position = Some(position);
-        self.duration = self.read_duration();
+        self.metadata = self.read_metadata();
         self.last_sent_position = Some(position);
         Ok(())
     }
@@ -419,14 +438,14 @@ impl ContinuousAction for MediaSeekAction {
         let changed = self.write_position(target)?;
         self.last_update = Some(Instant::now());
 
-        Ok(changed.then(|| ActionValue::seconds(target, self.duration)))
+        Ok(changed.then(|| ActionValue::media(target, &self.metadata)))
     }
 
     fn finish(&mut self) -> Result<Option<ActionValue>> {
         let update = if self.start_position.is_some() {
             let target = self.target_position(self.last_delta)?;
             self.write_position(target)?
-                .then(|| ActionValue::seconds(target, self.duration))
+                .then(|| ActionValue::media(target, &self.metadata))
         } else {
             None
         };
@@ -615,6 +634,27 @@ fn parse_mpris_length(raw: &str) -> Option<f64> {
     Some(microseconds / 1_000_000.0)
 }
 
+fn normalize_metadata_text(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn parse_media_metadata(raw: &str, separator: char) -> MediaMetadata {
+    let cleaned = raw.trim_end_matches(['\r', '\n']);
+    let mut fields = cleaned.splitn(4, separator);
+
+    let length = fields.next().unwrap_or_default();
+    let player_name = fields.next().unwrap_or_default();
+    let title = fields.next().unwrap_or_default();
+    let artist = fields.next().unwrap_or_default();
+
+    MediaMetadata {
+        duration: parse_mpris_length(length),
+        player_name: normalize_metadata_text(player_name),
+        title: normalize_metadata_text(title),
+        artist: normalize_metadata_text(artist),
+    }
+}
+
 fn validate_range(min: f64, max: f64) -> Result<()> {
     if !(0.0..=1.5).contains(&min) || !(0.0..=1.5).contains(&max) || min >= max {
         bail!("invalid action range: min={min}, max={max}");
@@ -718,21 +758,34 @@ mod tests {
     }
 
     #[test]
-    fn action_values_expose_explicit_units_and_maximums() {
+    fn action_values_expose_explicit_units_maximums_and_metadata() {
         let brightness = ActionValue::percent("brightness", 73, 100);
         assert_eq!(brightness.kind, "brightness");
         assert_eq!(brightness.value, 73.0);
         assert_eq!(brightness.max_value, 100.0);
         assert_eq!(brightness.unit, "percent");
+        assert!(brightness.source.is_empty());
+        assert!(brightness.title.is_empty());
+        assert!(brightness.artist.is_empty());
 
-        let media = ActionValue::seconds(123.456, Some(312.0));
+        let metadata = MediaMetadata {
+            duration: Some(312.0),
+            player_name: "spotify".to_string(),
+            title: "Example Song".to_string(),
+            artist: "Example Artist".to_string(),
+        };
+        let media = ActionValue::media(123.456, &metadata);
         assert_eq!(media.kind, "media-position");
         assert_eq!(media.value, 123.456);
         assert_eq!(media.max_value, 312.0);
         assert_eq!(media.unit, "seconds");
+        assert_eq!(media.source, "spotify");
+        assert_eq!(media.title, "Example Song");
+        assert_eq!(media.artist, "Example Artist");
 
-        let unknown_duration = ActionValue::seconds(12.0, None);
-        assert_eq!(unknown_duration.max_value, 0.0);
+        let unknown = ActionValue::media(12.0, &MediaMetadata::default());
+        assert_eq!(unknown.max_value, 0.0);
+        assert!(unknown.source.is_empty());
     }
 
     #[test]
@@ -746,11 +799,30 @@ mod tests {
     }
 
     #[test]
+    fn media_metadata_parser_handles_optional_fields() {
+        let metadata = parse_media_metadata(
+            "312000000\u{1f}spotify\u{1f}Example   Song\u{1f}Example Artist\n",
+            '\u{1f}',
+        );
+
+        assert_eq!(metadata.duration, Some(312.0));
+        assert_eq!(metadata.player_name, "spotify");
+        assert_eq!(metadata.title, "Example Song");
+        assert_eq!(metadata.artist, "Example Artist");
+
+        let sparse = parse_media_metadata("\u{1f}firefox\u{1f}Video title\u{1f}", '\u{1f}');
+        assert_eq!(sparse.duration, None);
+        assert_eq!(sparse.player_name, "firefox");
+        assert_eq!(sparse.title, "Video title");
+        assert!(sparse.artist.is_empty());
+    }
+
+    #[test]
     fn media_target_is_clamped_to_known_duration() {
         let mut action =
             MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
         action.start_position = Some(300.0);
-        action.duration = Some(312.0);
+        action.metadata.duration = Some(312.0);
 
         assert_eq!(action.target_position(1.0).unwrap(), 312.0);
     }

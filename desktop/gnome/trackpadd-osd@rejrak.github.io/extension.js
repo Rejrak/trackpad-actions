@@ -36,6 +36,36 @@ function formatDuration(seconds) {
     return `${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
 }
 
+function truncate(text, maximum) {
+    if (text.length <= maximum)
+        return text;
+
+    return `${text.slice(0, Math.max(1, maximum - 1))}…`;
+}
+
+function mediaLabel(source, title, artist, value, maxValue) {
+    const position = maxValue > 0
+        ? `${formatDuration(value)} / ${formatDuration(maxValue)}`
+        : formatDuration(value);
+
+    if (title && artist)
+        return `${truncate(artist, 20)} — ${truncate(title, 34)} · ${position}`;
+
+    if (title && source)
+        return `${truncate(source, 16)} · ${truncate(title, 36)} · ${position}`;
+
+    if (title)
+        return `${truncate(title, 44)} · ${position}`;
+
+    if (artist)
+        return `${truncate(artist, 36)} · ${position}`;
+
+    if (source)
+        return `${truncate(source, 24)} · ${position}`;
+
+    return `Media · ${position}`;
+}
+
 export default class TrackpaddNativeOsdExtension extends Extension {
     enable() {
         this._subscriptionId = Gio.DBus.session.signal_subscribe(
@@ -47,8 +77,19 @@ export default class TrackpaddNativeOsdExtension extends Extension {
             Gio.DBusSignalFlags.NONE,
             (_connection, _senderName, _objectPath, _interfaceName, _signalName, parameters) => {
                 try {
-                    const [actionId, kind, value, maxValue, unit] = parameters.deepUnpack();
-                    this._onActionValue(actionId, kind, value, maxValue, unit);
+                    const [actionId, kind, value, maxValue, unit, metadata] =
+                        parameters.deepUnpack();
+                    const [source, title, artist] = metadata;
+                    this._onActionValue(
+                        actionId,
+                        kind,
+                        value,
+                        maxValue,
+                        unit,
+                        source,
+                        title,
+                        artist
+                    );
                 } catch (error) {
                     console.error(`[trackpadd OSD] failed to handle D-Bus event: ${error}`);
                 }
@@ -65,7 +106,7 @@ export default class TrackpaddNativeOsdExtension extends Extension {
         Main.osdWindowManager.hideAll();
     }
 
-    _onActionValue(_actionId, kind, value, maxValue, unit) {
+    _onActionValue(_actionId, kind, value, maxValue, unit, source, title, artist) {
         if (!Number.isFinite(value) || !Number.isFinite(maxValue))
             return;
 
@@ -93,23 +134,16 @@ export default class TrackpaddNativeOsdExtension extends Extension {
             break;
         }
 
-        case 'media-position:seconds':
-            if (maxValue > 0) {
-                this._show(
-                    'media-playback-start-symbolic',
-                    `Media · ${formatDuration(value)} / ${formatDuration(maxValue)}`,
-                    clamp(value / maxValue, 0, 1),
-                    1
-                );
-            } else {
-                this._show(
-                    'media-playback-start-symbolic',
-                    `Media · ${formatDuration(value)}`,
-                    null,
-                    1
-                );
-            }
+        case 'media-position:seconds': {
+            const label = mediaLabel(source, title, artist, value, maxValue);
+            this._show(
+                'media-playback-start-symbolic',
+                label,
+                maxValue > 0 ? clamp(value / maxValue, 0, 1) : null,
+                1
+            );
             break;
+        }
 
         default:
             break;
