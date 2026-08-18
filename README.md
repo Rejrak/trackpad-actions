@@ -85,24 +85,15 @@ scripts/
 
 ## Compatibility
 
-### Official installer
+### Supported environment
 
-The official installer currently targets Linux desktop systems providing:
+The current source installer targets Linux desktop systems providing:
 
 * Linux `evdev`;
 * a compatible multitouch touchpad;
 * `udev`;
 * `systemd-logind`;
 * a systemd user manager.
-
-The recommended prebuilt releases are statically linked Linux binaries for:
-
-```text
-x86_64-unknown-linux-musl
-aarch64-unknown-linux-musl
-```
-
-Static release builds reduce dependencies on a distribution's libc version.
 
 The `trackpadd` binary itself is intentionally less distribution-specific than its packaging. Non-systemd distributions may still run it manually, but require their own input permission and service-manager integration.
 
@@ -121,7 +112,7 @@ Direct-input devices such as touchscreens and `SEMI_MT` devices are not currentl
 
 ## Runtime dependencies
 
-Rust is **not required** when installing a prebuilt GitHub Release.
+Once built, the daemon does not require Rust at runtime.
 
 Some configured actions require external commands.
 
@@ -133,12 +124,9 @@ Some configured actions require external commands.
 
 `wpctl` is normally provided by WirePlumber.
 
-The installer also expects common Linux utilities including:
+The source installer also expects common Linux utilities including:
 
 ```text
-curl
-tar
-sha256sum
 sudo
 udevadm
 systemctl
@@ -146,79 +134,26 @@ systemctl
 
 ## Installation
 
-> Before publishing the repository, replace `YOUR_GITHUB_USERNAME/trackpadd` below and inside `install.sh` with the actual GitHub `OWNER/REPO`.
-
-### Recommended installation
-
-Download and inspect the installer first:
+The currently supported installation path is from a source checkout.
 
 ```bash
-curl -fsSLo trackpadd-install.sh \
-  https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/trackpadd/main/install.sh
-
-less trackpadd-install.sh
-
-bash trackpadd-install.sh
+git clone https://github.com/Rejrak/trackpad-actions.git
+cd trackpad-actions
+./scripts/install-local.sh
 ```
 
-The installer will:
+The source installer builds the release binary locally, installs it to
+`~/.local/bin/trackpadd`, preserves an existing user configuration, installs
+the systemd user service and the restricted `udev/uaccess` rule, reloads udev,
+and enables the service.
 
-1. verify that the system is Linux;
-2. detect the CPU architecture;
-3. download the correct binary from the latest GitHub Release;
-4. verify its SHA-256 checksum;
-5. install the binary to `~/.local/bin/trackpadd`;
-6. create a default configuration if none exists;
-7. install the systemd user service;
-8. install the restricted `udev/uaccess` rule;
-9. reload udev;
-10. enable and start `trackpadd.service`.
-
-Existing configuration files are preserved during upgrades.
-
-### One-line installation
-
-For users who already trust the repository:
+To uninstall the locally installed daemon:
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/trackpadd/main/install.sh \
-  | bash
+./scripts/uninstall-local.sh
 ```
 
-Reviewing an installer before executing it is safer than piping remote code directly into a shell.
-
-### Install a specific version
-
-```bash
-bash trackpadd-install.sh --version v0.2.0
-```
-
-### Update
-
-Run the installer again:
-
-```bash
-bash trackpadd-install.sh
-```
-
-The binary and packaging files are replaced while the existing user configuration is preserved.
-
-### Uninstall
-
-```bash
-bash trackpadd-install.sh --uninstall
-```
-
-The uninstall operation removes:
-
-```text
-~/.local/bin/trackpadd
-systemd user unit
-/etc/udev/rules.d/69-trackpadd.rules
-```
-
-The user configuration is intentionally preserved.
+The user configuration is intentionally preserved by the uninstall script.
 
 ## Build from source
 
@@ -227,8 +162,8 @@ Building from source requires Rust **1.85 or newer**.
 Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/trackpadd.git
-cd trackpadd
+git clone https://github.com/Rejrak/trackpad-actions.git
+cd trackpad-actions
 ```
 
 Verify Rust:

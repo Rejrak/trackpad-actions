@@ -24,6 +24,7 @@ use trackpad_linux::{
 
 #[derive(Debug, Parser)]
 #[command(name = "trackpadd")]
+#[command(version)]
 #[command(about = "Configurable Linux trackpad gesture daemon")]
 struct Cli {
     #[command(subcommand)]
