@@ -1,5 +1,6 @@
 mod actions;
 mod config;
+mod ipc;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -58,6 +59,9 @@ enum Commands {
         config: Option<PathBuf>,
     },
 
+    /// Query the running daemon over D-Bus without opening the touchpad.
+    Status,
+
     /// Print normalized touch contacts and edge gesture events.
     Monitor {
         /// Explicit evdev path. If omitted, auto-select when exactly one compatible touchpad exists.
@@ -88,6 +92,7 @@ fn main() -> Result<()> {
         Commands::Devices { all, config } => devices(all, config),
         Commands::InitConfig { force } => init_config(force),
         Commands::CheckConfig { config } => check_config(resolve_config(config)?),
+        Commands::Status => status(),
         Commands::Monitor { device } => monitor(resolve_device(device)?),
         Commands::Run {
             device,
@@ -207,6 +212,18 @@ fn check_config(config_path: PathBuf) -> Result<()> {
     println!("Gestures: {}", config.gestures.len());
     println!("Actions: {}", config.actions.len());
     println!("Bindings: {}", config.bindings.len());
+
+    Ok(())
+}
+
+fn status() -> Result<()> {
+    let status = ipc::query_status()?;
+
+    println!("trackpadd {}", status.version);
+    println!("D-Bus service: {}", ipc::SERVICE_NAME);
+    println!("Device: {}", status.device_path);
+    println!("Config: {}", status.config_path);
+    println!("Dry run: {}", status.dry_run);
 
     Ok(())
 }
@@ -520,6 +537,18 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
 
     let mut reader = TouchpadReader::open(&device)
         .with_context(|| format!("failed to initialize touchpad {}", device.display()))?;
+
+    let _ipc_server = match ipc::start_server(&device, &config_path, dry_run) {
+        Ok(server) => {
+            println!("D-Bus: {}", ipc::SERVICE_NAME);
+            Some(server)
+        }
+        Err(error) => {
+            eprintln!("IPC WARNING: D-Bus status service unavailable: {error:#}");
+            None
+        }
+    };
+
     println!("Reading {} ({})", device.display(), reader.name());
     println!("Config: {}", config_path.display());
     println!("Dry run: {dry_run}");

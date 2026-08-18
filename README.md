@@ -22,6 +22,7 @@ The project intentionally keeps Linux input handling, gesture recognition, confi
 * `udev` + `uaccess` integration for safe touchpad access.
 * systemd user service.
 * Monitor and dry-run modes for debugging without modifying system state.
+* Read-only daemon status over the user D-Bus session bus.
 * No root daemon.
 
 ## Default example
@@ -496,6 +497,28 @@ Validate another file without opening the touchpad or executing actions:
 ```bash
 trackpadd check-config --config /path/to/config.toml
 ```
+
+### Query daemon status over D-Bus
+
+When `trackpadd run` is active and a user session bus is available:
+
+```bash
+trackpadd status
+```
+
+The command reports the running daemon version, selected input device, active
+configuration path, and whether the daemon is running in dry-run mode.
+
+The initial v0.3 D-Bus API uses:
+
+```text
+service:   io.github.Rejrak.Trackpadd
+path:      /io/github/Rejrak/Trackpadd
+interface: io.github.Rejrak.Trackpadd1
+```
+
+D-Bus setup is best-effort: failure to connect to the session bus does not stop
+gesture processing. In that case `trackpadd status` is unavailable.
 
 ### Monitor touch and gesture events
 

@@ -2,6 +2,13 @@
 
 All notable changes to `trackpadd` are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Read-only daemon status over the user D-Bus session bus.
+- `trackpadd status` for querying the running daemon without opening evdev.
+
 ## [0.2.0] - 2026-08-18
 
 ### Added
