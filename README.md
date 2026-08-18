@@ -23,6 +23,7 @@ The project intentionally keeps Linux input handling, gesture recognition, confi
 * systemd user service.
 * Monitor and dry-run modes for debugging without modifying system state.
 * Read-only daemon status over the user D-Bus session bus.
+* Optional GNOME Shell integration using GNOME's native OSD widget.
 * No root daemon.
 
 ## Default example
@@ -56,7 +57,15 @@ Mappings live in the configuration file and can be changed without recompiling.
        |
        +--> brightnessctl
        +--> wpctl
-       +--> future D-Bus / desktop adapters
+       +--> playerctl
+       |
+       +-- D-Bus ActionValueChanged
+               |
+               v
+      GNOME Shell extension
+               |
+               v
+       native GNOME OSD
 ```
 
 Repository layout:
@@ -79,9 +88,17 @@ packaging/
 └── udev/
     └── 69-trackpadd.rules
 
+desktop/
+└── gnome/
+    └── trackpadd-osd@rejrak.github.io/
+        ├── metadata.json
+        └── extension.js
+
 scripts/
 ├── install-local.sh
-└── uninstall-local.sh
+├── uninstall-local.sh
+├── install-gnome-extension.sh
+└── uninstall-gnome-extension.sh
 ```
 
 ## Compatibility
@@ -543,6 +560,47 @@ trackpadd watch
 This event stream is intended as the integration point for desktop OSDs and
 other lightweight consumers. IPC failures remain best-effort and never turn a
 successful gesture action into an action failure.
+
+### Native GNOME Shell OSD
+
+For GNOME Shell 45–50, trackpadd includes an optional Shell extension that
+subscribes directly to `ActionValueChanged` and renders feedback through GNOME
+Shell's own OSD window manager. This is the same Shell UI used for native
+brightness and volume feedback; it is not a desktop notification and it does
+not create a separate overlay window.
+
+Install the extension from the source checkout:
+
+```bash
+./scripts/install-gnome-extension.sh
+```
+
+On Wayland, a newly installed extension may require logging out and back in
+before GNOME Shell discovers it. Then enable it with:
+
+```bash
+gnome-extensions enable trackpadd-osd@rejrak.github.io
+```
+
+Inspect its state:
+
+```bash
+gnome-extensions info trackpadd-osd@rejrak.github.io
+```
+
+Brightness and volume use the native icon, label and level bar. Media seeking
+uses the same native OSD surface with the current clock position; the bar is
+hidden because the current D-Bus event does not yet expose total media duration.
+
+The adapter is intentionally GNOME-specific while the daemon's D-Bus event
+contract remains desktop-neutral. Other desktop environments can implement
+their own adapters without changing gesture recognition or action backends.
+
+Uninstall only the GNOME integration with:
+
+```bash
+./scripts/uninstall-gnome-extension.sh
+```
 
 ### Monitor touch and gesture events
 

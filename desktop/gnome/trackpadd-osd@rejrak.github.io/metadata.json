@@ -1,0 +1,7 @@
+{
+  "uuid": "trackpadd-osd@rejrak.github.io",
+  "name": "trackpadd Native OSD",
+  "description": "Shows trackpadd action values using GNOME Shell's native OSD.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/Rejrak/trackpad-actions"
+}

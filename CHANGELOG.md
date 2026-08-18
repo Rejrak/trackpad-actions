@@ -10,6 +10,8 @@ All notable changes to `trackpadd` are documented in this file.
 - `trackpadd status` for querying the running daemon without opening evdev.
 - D-Bus `ActionValueChanged` events for brightness, volume, and media position.
 - `trackpadd watch` for observing daemon action-value events.
+- Optional GNOME Shell 45–50 adapter using GNOME's native OSD window manager.
+- Helper scripts for installing and removing the GNOME Shell integration.
 
 ## [0.2.0] - 2026-08-18
 
