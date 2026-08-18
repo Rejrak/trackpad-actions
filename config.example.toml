@@ -38,7 +38,7 @@ cancel_margin = 0.04
 # type = "edge-swipe"
 # edge = "top"
 # width = 0.06
-# cancel_margin = 0.04
+# cancel_margin = 0.10
 
 # MVP backend: brightnessctl. Keep a non-zero minimum while experimenting.
 [[actions]]
@@ -55,6 +55,24 @@ type = "volume"
 command = "wpctl"
 min = 0.0
 max = 1.0
+
+# Optional continuous media scrubbing through playerctl/MPRIS.
+# Intended for a horizontal top-edge gesture.
+#
+# [[actions]]
+# id = "media-position"
+# type = "media-seek"
+# command = "playerctl"
+# seconds_per_full_swipe = 60
+# update_interval_ms = 50
+# deadzone = 0.025
+# curve = 1.4
+#
+# [[bindings]]
+# gesture = "top-edge"
+# action = "media-position"
+# sensitivity = 1.0
+# invert = false
 
 
 # Generic one-shot command action.

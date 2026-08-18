@@ -1,4 +1,7 @@
-use std::process::Command;
+use std::{
+    process::Command,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -200,6 +203,178 @@ impl ContinuousAction for VolumeAction {
 
     fn cancel(&mut self) -> Result<()> {
         self.finish()
+    }
+}
+
+pub struct MediaSeekAction {
+    command: String,
+    seconds_per_full_swipe: f64,
+    update_interval: Duration,
+    deadzone: f64,
+    curve: f64,
+    start_position: Option<f64>,
+    last_delta: f64,
+    last_update: Option<Instant>,
+    last_sent_position: Option<f64>,
+}
+
+impl MediaSeekAction {
+    pub fn new(
+        command: String,
+        seconds_per_full_swipe: f64,
+        update_interval_ms: u64,
+        deadzone: f64,
+        curve: f64,
+    ) -> Result<Self> {
+        if command.trim().is_empty() {
+            bail!("media-seek command must not be empty");
+        }
+        if !seconds_per_full_swipe.is_finite() || seconds_per_full_swipe <= 0.0 {
+            bail!("media-seek seconds_per_full_swipe must be a finite value > 0");
+        }
+        if update_interval_ms == 0 {
+            bail!("media-seek update_interval_ms must be > 0");
+        }
+        if !deadzone.is_finite() || !(0.0..0.5).contains(&deadzone) {
+            bail!("media-seek deadzone must be a finite value in [0, 0.5)");
+        }
+        if !curve.is_finite() || curve <= 0.0 {
+            bail!("media-seek curve must be a finite value > 0");
+        }
+
+        Ok(Self {
+            command,
+            seconds_per_full_swipe,
+            update_interval: Duration::from_millis(update_interval_ms),
+            deadzone,
+            curve,
+            start_position: None,
+            last_delta: 0.0,
+            last_update: None,
+            last_sent_position: None,
+        })
+    }
+
+    fn read_position(&self) -> Result<f64> {
+        let output = Command::new(&self.command)
+            .env("LC_ALL", "C")
+            .arg("position")
+            .output()
+            .with_context(|| format!("failed to execute {}", self.command))?;
+
+        if !output.status.success() {
+            bail!(
+                "{} position exited with {}: {}",
+                self.command,
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let position = stdout
+            .trim()
+            .parse::<f64>()
+            .with_context(|| format!("could not parse media position from: {}", stdout.trim()))?;
+
+        if !position.is_finite() || position < 0.0 {
+            bail!("media position must be a finite non-negative value; got {position}");
+        }
+
+        Ok(position)
+    }
+
+    fn shaped_delta(&self, delta: f64) -> f64 {
+        let magnitude = delta.abs();
+        if magnitude <= self.deadzone {
+            return 0.0;
+        }
+
+        let normalized = ((magnitude - self.deadzone) / (1.0 - self.deadzone)).clamp(0.0, 1.0);
+        delta.signum() * normalized.powf(self.curve)
+    }
+
+    fn target_position(&self, delta: f64) -> Result<f64> {
+        let start = self
+            .start_position
+            .ok_or_else(|| anyhow!("media-seek action updated before begin"))?;
+        let offset = self.shaped_delta(delta) * self.seconds_per_full_swipe;
+        Ok((start + offset).max(0.0))
+    }
+
+    fn should_update(&self) -> bool {
+        match self.last_update {
+            None => true,
+            Some(last_update) => last_update.elapsed() >= self.update_interval,
+        }
+    }
+
+    fn write_position(&mut self, position: f64) -> Result<()> {
+        if self
+            .last_sent_position
+            .is_some_and(|last| (last - position).abs() < 0.05)
+        {
+            return Ok(());
+        }
+
+        let position_arg = format!("{position:.3}");
+        let status = Command::new(&self.command)
+            .env("LC_ALL", "C")
+            .args(["position", position_arg.as_str()])
+            .status()
+            .with_context(|| format!("failed to execute {}", self.command))?;
+
+        if !status.success() {
+            bail!("{} position exited with {status}", self.command);
+        }
+
+        self.last_sent_position = Some(position);
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.start_position = None;
+        self.last_delta = 0.0;
+        self.last_update = None;
+        self.last_sent_position = None;
+    }
+}
+
+impl ContinuousAction for MediaSeekAction {
+    fn begin(&mut self) -> Result<()> {
+        self.reset();
+        let position = self.read_position()?;
+        self.start_position = Some(position);
+        self.last_sent_position = Some(position);
+        Ok(())
+    }
+
+    fn update(&mut self, delta: f64) -> Result<Option<f64>> {
+        self.last_delta = delta;
+
+        if !self.should_update() {
+            return Ok(None);
+        }
+
+        let target = self.target_position(delta)?;
+        self.write_position(target)?;
+        self.last_update = Some(Instant::now());
+        Ok(None)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        if self.start_position.is_some() {
+            let target = self.target_position(self.last_delta)?;
+            self.write_position(target)?;
+        }
+
+        self.reset();
+        Ok(())
+    }
+
+    fn cancel(&mut self) -> Result<()> {
+        self.reset();
+        Ok(())
     }
 }
 
@@ -440,5 +615,33 @@ mod tests {
         action.min_delta = 0.0;
         action.max_delta = 0.50;
         assert!(!action.direction_matches());
+    }
+
+    #[test]
+    fn media_seek_deadzone_filters_small_motion() {
+        let action = MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
+
+        assert_eq!(action.shaped_delta(0.020), 0.0);
+        assert_eq!(action.shaped_delta(-0.020), 0.0);
+        assert!(action.shaped_delta(0.25) > 0.0);
+        assert!(action.shaped_delta(-0.25) < 0.0);
+    }
+
+    #[test]
+    fn media_seek_curve_preserves_full_scale_and_direction() {
+        let action = MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
+
+        assert!((action.shaped_delta(1.0) - 1.0).abs() < f64::EPSILON);
+        assert!((action.shaped_delta(-1.0) + 1.0).abs() < f64::EPSILON);
+        assert!(action.shaped_delta(0.25) < 0.25);
+    }
+
+    #[test]
+    fn media_seek_rejects_invalid_parameters() {
+        assert!(MediaSeekAction::new("".to_string(), 60.0, 50, 0.025, 1.4).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 0.0, 50, 0.025, 1.4).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 0, 0.025, 1.4).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.5, 1.4).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 0.0).is_err());
     }
 }

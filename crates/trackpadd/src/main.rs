@@ -8,7 +8,7 @@ use std::{
 
 use actions::{
     BrightnessAction, CommandAction, CommandDirection, CommandTrigger, ContinuousAction,
-    PrintAction, VolumeAction,
+    MediaSeekAction, PrintAction, VolumeAction,
 };
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -386,7 +386,7 @@ fn monitor(device: PathBuf) -> Result<()> {
         0.06,
         0.04,
     ));
-    engine.add(EdgeSwipeRecognizer::new("top-edge", Edge::Top, 0.06, 0.04));
+    engine.add(EdgeSwipeRecognizer::new("top-edge", Edge::Top, 0.06, 0.10));
 
     loop {
         let frame = reader.next_frame()?;
@@ -485,6 +485,23 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                 };
                 let implementation =
                     CommandAction::new(id.clone(), command, args, trigger, direction, threshold)?;
+                (id, Box::new(implementation))
+            }
+            ActionConfig::MediaSeek {
+                id,
+                command,
+                seconds_per_full_swipe,
+                update_interval_ms,
+                deadzone,
+                curve,
+            } => {
+                let implementation = MediaSeekAction::new(
+                    command,
+                    seconds_per_full_swipe,
+                    update_interval_ms,
+                    deadzone,
+                    curve,
+                )?;
                 (id, Box::new(implementation))
             }
         };

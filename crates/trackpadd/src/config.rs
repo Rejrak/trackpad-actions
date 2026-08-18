@@ -100,6 +100,36 @@ impl AppConfig {
                         );
                     }
                 }
+                ActionConfig::MediaSeek {
+                    command,
+                    seconds_per_full_swipe,
+                    update_interval_ms,
+                    deadzone,
+                    curve,
+                    ..
+                } => {
+                    if command.trim().is_empty() {
+                        bail!("media-seek action '{id}' command must not be empty");
+                    }
+                    if !seconds_per_full_swipe.is_finite() || *seconds_per_full_swipe <= 0.0 {
+                        bail!(
+                            "media-seek action '{id}' seconds_per_full_swipe must be a finite value > 0; got {seconds_per_full_swipe}"
+                        );
+                    }
+                    if *update_interval_ms == 0 {
+                        bail!("media-seek action '{id}' update_interval_ms must be > 0");
+                    }
+                    if !deadzone.is_finite() || !(0.0..0.5).contains(deadzone) {
+                        bail!(
+                            "media-seek action '{id}' deadzone must be a finite value in [0, 0.5); got {deadzone}"
+                        );
+                    }
+                    if !curve.is_finite() || *curve <= 0.0 {
+                        bail!(
+                            "media-seek action '{id}' curve must be a finite value > 0; got {curve}"
+                        );
+                    }
+                }
             }
         }
 
@@ -287,6 +317,19 @@ pub enum ActionConfig {
         #[serde(default = "default_command_threshold")]
         threshold: f64,
     },
+    MediaSeek {
+        id: String,
+        #[serde(default = "default_media_seek_command")]
+        command: String,
+        #[serde(default = "default_media_seek_seconds_per_full_swipe")]
+        seconds_per_full_swipe: f64,
+        #[serde(default = "default_media_seek_update_interval_ms")]
+        update_interval_ms: u64,
+        #[serde(default = "default_media_seek_deadzone")]
+        deadzone: f64,
+        #[serde(default = "default_media_seek_curve")]
+        curve: f64,
+    },
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -314,7 +357,8 @@ impl ActionConfig {
             Self::Brightness { id, .. }
             | Self::Volume { id, .. }
             | Self::Print { id, .. }
-            | Self::Command { id, .. } => id,
+            | Self::Command { id, .. }
+            | Self::MediaSeek { id, .. } => id,
         }
     }
 }
@@ -385,6 +429,26 @@ fn default_volume_command() -> String {
 
 fn default_command_threshold() -> f64 {
     0.10
+}
+
+fn default_media_seek_command() -> String {
+    "playerctl".to_string()
+}
+
+fn default_media_seek_seconds_per_full_swipe() -> f64 {
+    60.0
+}
+
+fn default_media_seek_update_interval_ms() -> u64 {
+    50
+}
+
+fn default_media_seek_deadzone() -> f64 {
+    0.025
+}
+
+fn default_media_seek_curve() -> f64 {
+    1.4
 }
 
 #[cfg(test)]
@@ -721,5 +785,91 @@ mod tests {
         assert!(error
             .to_string()
             .contains("threshold must be a finite value > 0"));
+    }
+
+    #[test]
+    fn media_seek_action_defaults_are_valid() {
+        let config = parse(
+            r#"
+            [[actions]]
+            id = "media"
+            type = "media-seek"
+            "#,
+        )
+        .unwrap();
+
+        let ActionConfig::MediaSeek {
+            command,
+            seconds_per_full_swipe,
+            update_interval_ms,
+            deadzone,
+            curve,
+            ..
+        } = &config.actions[0]
+        else {
+            panic!("expected media-seek action");
+        };
+
+        assert_eq!(command, "playerctl");
+        assert!((*seconds_per_full_swipe - 60.0).abs() < f64::EPSILON);
+        assert_eq!(*update_interval_ms, 50);
+        assert!((*deadzone - 0.025).abs() < f64::EPSILON);
+        assert!((*curve - 1.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn media_seek_action_parses_custom_values() {
+        let config = parse(
+            r#"
+            [[actions]]
+            id = "media"
+            type = "media-seek"
+            command = "playerctl"
+            seconds_per_full_swipe = 90
+            update_interval_ms = 75
+            deadzone = 0.03
+            curve = 1.6
+            "#,
+        )
+        .unwrap();
+
+        let ActionConfig::MediaSeek {
+            seconds_per_full_swipe,
+            update_interval_ms,
+            deadzone,
+            curve,
+            ..
+        } = &config.actions[0]
+        else {
+            panic!("expected media-seek action");
+        };
+
+        assert!((*seconds_per_full_swipe - 90.0).abs() < f64::EPSILON);
+        assert_eq!(*update_interval_ms, 75);
+        assert!((*deadzone - 0.03).abs() < f64::EPSILON);
+        assert!((*curve - 1.6).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn media_seek_action_rejects_invalid_values() {
+        for invalid in [
+            "seconds_per_full_swipe = 0",
+            "update_interval_ms = 0",
+            "deadzone = 0.5",
+            "curve = 0",
+        ] {
+            let source = format!(
+                r#"
+                [[actions]]
+                id = "media"
+                type = "media-seek"
+                {invalid}
+                "#
+            );
+            assert!(
+                parse(&source).is_err(),
+                "expected invalid config: {invalid}"
+            );
+        }
     }
 }

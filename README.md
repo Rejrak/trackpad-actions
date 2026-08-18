@@ -9,10 +9,12 @@ The project intentionally keeps Linux input handling, gesture recognition, confi
 ## Features
 
 * One-finger vertical swipes starting from the **left** or **right** physical trackpad edge.
+* One-finger horizontal swipes starting from the **top** physical trackpad edge.
 * Configurable activation width and cancellation margin.
 * Configurable gesture sensitivity and direction inversion.
 * Screen brightness control through `brightnessctl`.
 * Default audio output volume control through `wpctl`.
+* Continuous media-position scrubbing through `playerctl` / MPRIS.
 * Print/debug actions for testing mappings.
 * Automatic touchpad selection when exactly one compatible device is available.
 * Explicit device selection when multiple compatible touchpads exist.
@@ -127,6 +129,7 @@ Some configured actions require external commands.
 | ----------------- | --------------- |
 | Screen brightness | `brightnessctl` |
 | Speaker volume    | `wpctl`         |
+| Media scrubbing   | `playerctl`     |
 
 `wpctl` is normally provided by WirePlumber.
 
@@ -419,7 +422,7 @@ id = "top-edge"
 type = "edge-swipe"
 edge = "top"
 width = 0.06
-cancel_margin = 0.04
+cancel_margin = 0.10
 ```
 
 It must start in the top activation band. Moving right produces a positive delta; moving left produces a negative delta. Moving too far downward after activation cancels the gesture.
@@ -457,6 +460,30 @@ The current backend controls:
 ```text
 @DEFAULT_AUDIO_SINK@
 ```
+
+### Media seek
+
+Continuous media scrubbing uses `playerctl`, which controls MPRIS-compatible players:
+
+```toml
+[[actions]]
+id = "media-position"
+type = "media-seek"
+command = "playerctl"
+seconds_per_full_swipe = 60
+update_interval_ms = 50
+deadzone = 0.025
+curve = 1.4
+```
+
+`seconds_per_full_swipe` is the maximum signed offset represented by a normalized
+full-width gesture. `deadzone` filters small initial movements. `curve > 1`
+provides more precision near the starting point and progressively accelerates
+larger movements. Updates are rate-limited by `update_interval_ms`.
+
+The action reads the current media position when the gesture starts, then seeks
+relative to that starting position. Players or streams that do not support MPRIS
+seeking may reject the operation.
 
 ### Debug action
 
