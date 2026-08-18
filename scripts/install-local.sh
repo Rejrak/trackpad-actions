@@ -28,7 +28,7 @@ command -v systemctl >/dev/null 2>&1 || {
 cd "$ROOT_DIR"
 
 echo "==> Building trackpadd"
-cargo build --release -p trackpadd
+cargo build --release --locked -p trackpadd
 
 echo "==> Installing binary to ${BIN_DIR}/trackpadd"
 install -Dm755 target/release/trackpadd "${BIN_DIR}/trackpadd"
@@ -48,9 +48,10 @@ sudo install -Dm644 packaging/udev/69-trackpadd.rules "$UDEV_RULE_DEST"
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input --action=change
 
-echo "==> Enabling user service"
+echo "==> Enabling and restarting user service"
 systemctl --user daemon-reload
-systemctl --user enable --now trackpadd.service
+systemctl --user enable trackpadd.service
+systemctl --user restart trackpadd.service
 
 echo
 echo "Installed. Useful commands:"
