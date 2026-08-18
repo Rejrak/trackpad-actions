@@ -2,6 +2,8 @@
 
 Configurable Linux trackpad edge gestures for desktop actions.
 
+**Latest stable release:** [`v0.3.0`](https://github.com/Rejrak/trackpad-actions/releases/tag/v0.3.0) · [Changelog](CHANGELOG.md)
+
 `trackpadd` reads multitouch events directly from Linux `evdev`, recognizes configurable edge swipes, and maps them to actions such as screen brightness and speaker volume.
 
 The project intentionally keeps Linux input handling, gesture recognition, configuration, and desktop actions separate so the core is not tied to a particular Linux distribution or desktop environment.
@@ -22,9 +24,24 @@ The project intentionally keeps Linux input handling, gesture recognition, confi
 * `udev` + `uaccess` integration for safe touchpad access.
 * systemd user service.
 * Monitor and dry-run modes for debugging without modifying system state.
-* Read-only daemon status over the user D-Bus session bus.
-* Optional GNOME Shell integration using GNOME's native OSD widget.
+* Read-only daemon status via `trackpadd status` and action-value streaming via `trackpadd watch`.
+* Optional GNOME Shell 45–50 adapter using GNOME's native OSD for brightness, volume, and media feedback.
+* Media feedback can include MPRIS duration/player/title/artist context and the current PipeWire output name.
 * No root daemon.
+
+## What's new in v0.3.0
+
+`v0.3.0` adds the desktop-integration layer while keeping the Rust daemon
+desktop-neutral:
+
+* user-session D-Bus status through `trackpadd status`;
+* `ActionValueChanged` events and `trackpadd watch`;
+* an optional GNOME Shell 45–50 adapter using the native Shell OSD;
+* real media progress and MPRIS player/title/artist context when available;
+* current PipeWire output context for volume feedback;
+* hardened source installation using the checked-in `Cargo.lock`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete release notes.
 
 ## Default example
 
@@ -152,19 +169,42 @@ systemctl
 
 ## Installation
 
-The currently supported installation path is from a source checkout.
+### Stable release (recommended)
+
+The latest stable release is `v0.3.0`. To install exactly that version:
 
 ```bash
 git clone https://github.com/Rejrak/trackpad-actions.git
 cd trackpad-actions
+git checkout v0.3.0
 ./scripts/install-local.sh
 ```
 
-The source installer builds the release binary using the checked-in
-`Cargo.lock`, installs it to `~/.local/bin/trackpadd`, preserves an existing
-user configuration, installs the systemd user service and the restricted
-`udev/uaccess` rule, reloads udev, enables the service, and restarts it so an
-upgrade immediately runs the newly installed binary.
+Verify the installed daemon:
+
+```bash
+~/.local/bin/trackpadd --version
+```
+
+Expected output:
+
+```text
+trackpadd 0.3.0
+```
+
+The installer builds against the checked-in `Cargo.lock`, installs the binary
+to `~/.local/bin/trackpadd`, preserves an existing user configuration, installs
+the systemd user service and restricted `udev/uaccess` rule, reloads udev, and
+restarts the service so the installed binary is active immediately.
+
+On GNOME Shell 45–50, the native OSD adapter is optional and installed
+separately:
+
+```bash
+./scripts/install-gnome-extension.sh
+```
+
+The GNOME-specific adapter remains separate from the desktop-neutral daemon.
 
 To uninstall the locally installed daemon:
 
@@ -172,9 +212,25 @@ To uninstall the locally installed daemon:
 ./scripts/uninstall-local.sh
 ```
 
-The user configuration is intentionally preserved by the uninstall script.
+To remove only the GNOME integration:
+
+```bash
+./scripts/uninstall-gnome-extension.sh
+```
+
+The user configuration is intentionally preserved by the daemon uninstall
+script.
+
+### Development branch
+
+The `main` branch tracks ongoing development and may move ahead of the latest
+stable release. Contributors who want the current development state can use
+`main`; users who want reproducible installation should use the release tag
+shown above.
 
 ## Build from source
+
+These commands are for building the current checkout. For a reproducible stable install, use the tagged release instructions in [Installation](#installation).
 
 Building from source requires Rust **1.85 or newer**.
 
@@ -228,21 +284,7 @@ The executable will be:
 target/release/trackpadd
 ```
 
-### Install from a source checkout
-
-The repository includes a development/source installer:
-
-```bash
-./scripts/install-local.sh
-```
-
-It builds the release binary locally and installs the binary, user configuration, systemd unit, and udev rule.
-
-To uninstall:
-
-```bash
-./scripts/uninstall-local.sh
-```
+For installation, upgrade, and uninstall commands, see [Installation](#installation).
 
 ## Configuration
 
