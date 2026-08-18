@@ -229,10 +229,7 @@ impl VolumeAction {
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        ["node.nick", "node.description", "node.name"]
-            .into_iter()
-            .find_map(|key| parse_wpctl_property(&stdout, key))
-            .unwrap_or_default()
+        select_wpctl_source(&stdout)
     }
 
     fn write_value(&mut self, value: f64) -> Result<Option<u32>> {
@@ -680,6 +677,13 @@ fn parse_wpctl_property(raw: &str, key: &str) -> Option<String> {
     })
 }
 
+fn select_wpctl_source(raw: &str) -> String {
+    ["node.nick", "node.description", "node.name"]
+        .into_iter()
+        .find_map(|key| parse_wpctl_property(raw, key))
+        .unwrap_or_default()
+}
+
 fn parse_mpris_length(raw: &str) -> Option<f64> {
     let microseconds = raw.trim().parse::<f64>().ok()?;
     if !microseconds.is_finite() || microseconds <= 0.0 {
@@ -861,6 +865,38 @@ mod tests {
             Some("Built-in Audio Analog Stereo")
         );
         assert_eq!(parse_wpctl_property(inspect, "missing"), None);
+    }
+
+    #[test]
+    fn wpctl_source_prefers_nick_then_description_then_name() {
+        let all_fields = r#"
+            node.name = "alsa_output.pci-0000_03_00.6.analog-stereo"
+            node.description = "Ryzen HD Audio Controller Analog Stereo"
+            node.nick = "ALC256 Analog"
+        "#;
+        assert_eq!(select_wpctl_source(all_fields), "ALC256 Analog");
+
+        let description_only = r#"
+            node.name = "alsa_output.pci-0000_03_00.6.analog-stereo"
+            node.description = "Ryzen HD Audio Controller Analog Stereo"
+        "#;
+        assert_eq!(
+            select_wpctl_source(description_only),
+            "Ryzen HD Audio Controller Analog Stereo"
+        );
+
+        let name_only = r#"
+            node.name = "alsa_output.pci-0000_03_00.6.analog-stereo"
+        "#;
+        assert_eq!(
+            select_wpctl_source(name_only),
+            "alsa_output.pci-0000_03_00.6.analog-stereo"
+        );
+
+        let no_name = r#"
+            id 42, type PipeWire:Interface:Node/3
+        "#;
+        assert_eq!(select_wpctl_source(no_name), "");
     }
 
     #[test]
