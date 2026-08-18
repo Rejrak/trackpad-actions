@@ -9,22 +9,25 @@ use anyhow::{anyhow, bail, Context, Result};
 pub struct ActionValue {
     pub kind: &'static str,
     pub value: f64,
+    pub max_value: f64,
     pub unit: &'static str,
 }
 
 impl ActionValue {
-    fn percent(kind: &'static str, percent: u32) -> Self {
+    fn percent(kind: &'static str, percent: u32, max_percent: u32) -> Self {
         Self {
             kind,
             value: f64::from(percent),
+            max_value: f64::from(max_percent),
             unit: "percent",
         }
     }
 
-    fn seconds(position: f64) -> Self {
+    fn seconds(position: f64, duration: Option<f64>) -> Self {
         Self {
             kind: "media-position",
             value: position,
+            max_value: duration.unwrap_or(0.0),
             unit: "seconds",
         }
     }
@@ -121,9 +124,10 @@ impl ContinuousAction for BrightnessAction {
             .start_value
             .ok_or_else(|| anyhow!("brightness action updated before begin"))?;
         let target = (start + delta).clamp(self.min, self.max);
+        let max_percent = (self.max * 100.0).round() as u32;
         Ok(self
             .write_value(target)?
-            .map(|percent| ActionValue::percent("brightness", percent)))
+            .map(|percent| ActionValue::percent("brightness", percent, max_percent)))
     }
 
     fn finish(&mut self) -> Result<Option<ActionValue>> {
@@ -219,9 +223,10 @@ impl ContinuousAction for VolumeAction {
             .start_value
             .ok_or_else(|| anyhow!("volume action updated before begin"))?;
         let target = (start + delta).clamp(self.min, self.max);
+        let max_percent = (self.max * 100.0).round() as u32;
         Ok(self
             .write_value(target)?
-            .map(|percent| ActionValue::percent("volume", percent)))
+            .map(|percent| ActionValue::percent("volume", percent, max_percent)))
     }
 
     fn finish(&mut self) -> Result<Option<ActionValue>> {
@@ -244,6 +249,7 @@ pub struct MediaSeekAction {
     deadzone: f64,
     curve: f64,
     start_position: Option<f64>,
+    duration: Option<f64>,
     last_delta: f64,
     last_update: Option<Instant>,
     last_sent_position: Option<f64>,
@@ -280,6 +286,7 @@ impl MediaSeekAction {
             deadzone,
             curve,
             start_position: None,
+            duration: None,
             last_delta: 0.0,
             last_update: None,
             last_sent_position: None,
@@ -315,6 +322,20 @@ impl MediaSeekAction {
         Ok(position)
     }
 
+    fn read_duration(&self) -> Option<f64> {
+        let output = Command::new(&self.command)
+            .env("LC_ALL", "C")
+            .args(["metadata", "--format", "{{mpris:length}}"])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        parse_mpris_length(&String::from_utf8_lossy(&output.stdout))
+    }
+
     fn shaped_delta(&self, delta: f64) -> f64 {
         let magnitude = delta.abs();
         if magnitude <= self.deadzone {
@@ -330,7 +351,12 @@ impl MediaSeekAction {
             .start_position
             .ok_or_else(|| anyhow!("media-seek action updated before begin"))?;
         let offset = self.shaped_delta(delta) * self.seconds_per_full_swipe;
-        Ok((start + offset).max(0.0))
+        let target = (start + offset).max(0.0);
+
+        Ok(match self.duration {
+            Some(duration) => target.min(duration),
+            None => target,
+        })
     }
 
     fn should_update(&self) -> bool {
@@ -365,6 +391,7 @@ impl MediaSeekAction {
 
     fn reset(&mut self) {
         self.start_position = None;
+        self.duration = None;
         self.last_delta = 0.0;
         self.last_update = None;
         self.last_sent_position = None;
@@ -376,6 +403,7 @@ impl ContinuousAction for MediaSeekAction {
         self.reset();
         let position = self.read_position()?;
         self.start_position = Some(position);
+        self.duration = self.read_duration();
         self.last_sent_position = Some(position);
         Ok(())
     }
@@ -391,14 +419,14 @@ impl ContinuousAction for MediaSeekAction {
         let changed = self.write_position(target)?;
         self.last_update = Some(Instant::now());
 
-        Ok(changed.then(|| ActionValue::seconds(target)))
+        Ok(changed.then(|| ActionValue::seconds(target, self.duration)))
     }
 
     fn finish(&mut self) -> Result<Option<ActionValue>> {
         let update = if self.start_position.is_some() {
             let target = self.target_position(self.last_delta)?;
             self.write_position(target)?
-                .then(|| ActionValue::seconds(target))
+                .then(|| ActionValue::seconds(target, self.duration))
         } else {
             None
         };
@@ -578,6 +606,15 @@ impl ContinuousAction for PrintAction {
     }
 }
 
+fn parse_mpris_length(raw: &str) -> Option<f64> {
+    let microseconds = raw.trim().parse::<f64>().ok()?;
+    if !microseconds.is_finite() || microseconds <= 0.0 {
+        return None;
+    }
+
+    Some(microseconds / 1_000_000.0)
+}
+
 fn validate_range(min: f64, max: f64) -> Result<()> {
     if !(0.0..=1.5).contains(&min) || !(0.0..=1.5).contains(&max) || min >= max {
         bail!("invalid action range: min={min}, max={max}");
@@ -681,15 +718,40 @@ mod tests {
     }
 
     #[test]
-    fn action_values_expose_explicit_units() {
-        let brightness = ActionValue::percent("brightness", 73);
+    fn action_values_expose_explicit_units_and_maximums() {
+        let brightness = ActionValue::percent("brightness", 73, 100);
         assert_eq!(brightness.kind, "brightness");
         assert_eq!(brightness.value, 73.0);
+        assert_eq!(brightness.max_value, 100.0);
         assert_eq!(brightness.unit, "percent");
 
-        let media = ActionValue::seconds(123.456);
+        let media = ActionValue::seconds(123.456, Some(312.0));
         assert_eq!(media.kind, "media-position");
         assert_eq!(media.value, 123.456);
+        assert_eq!(media.max_value, 312.0);
         assert_eq!(media.unit, "seconds");
+
+        let unknown_duration = ActionValue::seconds(12.0, None);
+        assert_eq!(unknown_duration.max_value, 0.0);
+    }
+
+    #[test]
+    fn mpris_length_is_converted_from_microseconds_to_seconds() {
+        assert_eq!(parse_mpris_length("312000000\n"), Some(312.0));
+        assert_eq!(parse_mpris_length("136400000"), Some(136.4));
+        assert_eq!(parse_mpris_length(""), None);
+        assert_eq!(parse_mpris_length("not-a-number"), None);
+        assert_eq!(parse_mpris_length("0"), None);
+        assert_eq!(parse_mpris_length("-1"), None);
+    }
+
+    #[test]
+    fn media_target_is_clamped_to_known_duration() {
+        let mut action =
+            MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
+        action.start_position = Some(300.0);
+        action.duration = Some(312.0);
+
+        assert_eq!(action.target_position(1.0).unwrap(), 312.0);
     }
 }

@@ -47,8 +47,8 @@ export default class TrackpaddNativeOsdExtension extends Extension {
             Gio.DBusSignalFlags.NONE,
             (_connection, _senderName, _objectPath, _interfaceName, _signalName, parameters) => {
                 try {
-                    const [actionId, kind, value, unit] = parameters.deepUnpack();
-                    this._onActionValue(actionId, kind, value, unit);
+                    const [actionId, kind, value, maxValue, unit] = parameters.deepUnpack();
+                    this._onActionValue(actionId, kind, value, maxValue, unit);
                 } catch (error) {
                     console.error(`[trackpadd OSD] failed to handle D-Bus event: ${error}`);
                 }
@@ -65,38 +65,50 @@ export default class TrackpaddNativeOsdExtension extends Extension {
         Main.osdWindowManager.hideAll();
     }
 
-    _onActionValue(_actionId, kind, value, unit) {
-        if (!Number.isFinite(value))
+    _onActionValue(_actionId, kind, value, maxValue, unit) {
+        if (!Number.isFinite(value) || !Number.isFinite(maxValue))
             return;
 
         switch (`${kind}:${unit}`) {
-        case 'brightness:percent':
+        case 'brightness:percent': {
+            const maximum = maxValue > 0 ? maxValue : 100;
             this._show(
                 'display-brightness-symbolic',
                 'Brightness',
-                clamp(value / 100, 0, 1),
+                clamp(value / maximum, 0, 1),
                 1
             );
             break;
+        }
 
         case 'volume:percent': {
             const rawLevel = Math.max(0, value / 100);
+            const maximum = maxValue > 0 ? maxValue : 100;
             this._show(
                 volumeIcon(rawLevel),
                 'Volume',
-                clamp(rawLevel, 0, 1),
+                clamp(value / maximum, 0, 1),
                 1
             );
             break;
         }
 
         case 'media-position:seconds':
-            this._show(
-                'media-playback-start-symbolic',
-                `Media · ${formatDuration(value)}`,
-                null,
-                1
-            );
+            if (maxValue > 0) {
+                this._show(
+                    'media-playback-start-symbolic',
+                    `Media · ${formatDuration(value)} / ${formatDuration(maxValue)}`,
+                    clamp(value / maxValue, 0, 1),
+                    1
+                );
+            } else {
+                this._show(
+                    'media-playback-start-symbolic',
+                    `Media · ${formatDuration(value)}`,
+                    null,
+                    1
+                );
+            }
             break;
 
         default:

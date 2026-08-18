@@ -46,6 +46,7 @@ impl DaemonInterface {
         action_id: &str,
         kind: &str,
         value: f64,
+        max_value: f64,
         unit: &str,
     ) -> zbus::Result<()>;
 }
@@ -60,6 +61,7 @@ impl IpcServer {
         action_id: &str,
         kind: &str,
         value: f64,
+        max_value: f64,
         unit: &str,
     ) -> Result<()> {
         self.connection
@@ -68,7 +70,7 @@ impl IpcServer {
                 OBJECT_PATH,
                 INTERFACE_NAME,
                 ACTION_VALUE_CHANGED_SIGNAL,
-                &(action_id, kind, value, unit),
+                &(action_id, kind, value, max_value, unit),
             )
             .context("failed to emit ActionValueChanged D-Bus signal")
     }
@@ -144,13 +146,14 @@ pub fn watch_action_values() -> Result<()> {
     );
 
     for message in signals {
-        let (action_id, kind, value, unit): (String, String, f64, String) = message
-            .body()
-            .deserialize()
-            .context("failed to decode ActionValueChanged")?;
+        let (action_id, kind, value, max_value, unit): (String, String, f64, f64, String) =
+            message
+                .body()
+                .deserialize()
+                .context("failed to decode ActionValueChanged")?;
 
         println!(
-            "ACTION VALUE action={} kind={} value={value:.3} unit={}",
+            "ACTION VALUE action={} kind={} value={value:.3} max={max_value:.3} unit={}",
             action_id, kind, unit
         );
     }

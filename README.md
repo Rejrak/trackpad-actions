@@ -435,8 +435,11 @@ provides more precision near the starting point and progressively accelerates
 larger movements. Updates are rate-limited by `update_interval_ms`.
 
 The action reads the current media position when the gesture starts, then seeks
-relative to that starting position. Players or streams that do not support MPRIS
-seeking may reject the operation.
+relative to that starting position. It also reads the optional MPRIS
+`mpris:length` metadata once at gesture start. When available, that duration is
+used to clamp seeking to the end of the media and is exposed to desktop adapters.
+Players or streams that do not support MPRIS seeking may reject the operation;
+players that omit `mpris:length` continue to work without duration-aware UI.
 
 ### Debug action
 
@@ -540,7 +543,7 @@ gesture processing. In that case `trackpadd status` is unavailable.
 Action backends that expose continuous values also emit:
 
 ```text
-ActionValueChanged(action_id, kind, value, unit)
+ActionValueChanged(action_id, kind, value, max_value, unit)
 ```
 
 Current value kinds are:
@@ -550,6 +553,10 @@ brightness      percent
 volume          percent
 media-position  seconds
 ```
+
+`max_value` is the configured percentage ceiling for brightness/volume. For
+`media-position`, it is the total media duration in seconds when the active
+player exposes `mpris:length`; `0` means that no maximum is currently known.
 
 Watch these events from another terminal with:
 
@@ -589,8 +596,9 @@ gnome-extensions info trackpadd-osd@rejrak.github.io
 ```
 
 Brightness and volume use the native icon, label and level bar. Media seeking
-uses the same native OSD surface with the current clock position; the bar is
-hidden because the current D-Bus event does not yet expose total media duration.
+shows the current and total clock position plus a native progress bar when the
+player exposes `mpris:length`. If the duration is unavailable, the same OSD
+falls back to the current clock position without a bar.
 
 The adapter is intentionally GNOME-specific while the daemon's D-Bus event
 contract remains desktop-neutral. Other desktop environments can implement

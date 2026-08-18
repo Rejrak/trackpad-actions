@@ -12,6 +12,8 @@ All notable changes to `trackpadd` are documented in this file.
 - `trackpadd watch` for observing daemon action-value events.
 - Optional GNOME Shell 45–50 adapter using GNOME's native OSD window manager.
 - Helper scripts for installing and removing the GNOME Shell integration.
+- Media duration propagation from MPRIS `mpris:length` through D-Bus to the
+  native GNOME OSD, including a real seek progress bar when duration is known.
 
 ## [0.2.0] - 2026-08-18
 

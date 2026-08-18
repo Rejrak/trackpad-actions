@@ -610,6 +610,7 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                                 &binding.action,
                                 value.kind,
                                 value.value,
+                                value.max_value,
                                 value.unit,
                             ) {
                                 eprintln!(
@@ -662,8 +663,8 @@ fn dispatch_action(
 
 fn print_action_value(binding: &BindingConfig, value: &ActionValue) {
     println!(
-        "VALUE action={} kind={} value={:.3} unit={}",
-        binding.action, value.kind, value.value, value.unit
+        "VALUE action={} kind={} value={:.3} max={:.3} unit={}",
+        binding.action, value.kind, value.value, value.max_value, value.unit
     );
 }
 
