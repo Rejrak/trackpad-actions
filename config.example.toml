@@ -74,14 +74,18 @@ max = 1.0
 # command = "playerctl"
 # seconds_per_full_swipe = 60
 # update_interval_ms = 50
-# deadzone = 0.025
-# curve = 1.4
+#
+# New v0.4 configurations place response shaping on the binding.
+# Existing v0.3 media-seek deadzone/curve action fields remain accepted as a
+# compatibility fallback when neither field is set on the binding.
 #
 # [[bindings]]
 # gesture = "top-edge"
 # action = "media-position"
 # sensitivity = 1.0
 # invert = false
+# deadzone = 0.025
+# curve = 1.4
 
 
 # Generic one-shot command action.
@@ -93,8 +97,9 @@ max = 1.0
 # The default trigger is "end": the command runs only when the gesture ends
 # normally and the transformed delta reaches `threshold` at least once.
 #
-# direction can be "any", "up", "down", "left", or "right". `sensitivity` and `invert` from the
-# binding are applied before this threshold/direction check.
+# direction can be "any", "up", "down", "left", or "right". The binding's
+# response shaping, sensitivity, and inversion are applied before this
+# threshold/direction check.
 #
 # [[actions]]
 # id = "lock-session"

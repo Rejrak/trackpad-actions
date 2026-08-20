@@ -488,14 +488,16 @@ type = "media-seek"
 command = "playerctl"
 seconds_per_full_swipe = 60
 update_interval_ms = 50
-deadzone = 0.025
-curve = 1.4
 ```
 
 `seconds_per_full_swipe` is the maximum signed offset represented by a normalized
-full-width gesture. `deadzone` filters small initial movements. `curve > 1`
-provides more precision near the starting point and progressively accelerates
-larger movements. Updates are rate-limited by `update_interval_ms`.
+full-width gesture. Updates are rate-limited by `update_interval_ms`.
+
+For v0.4, response shaping belongs on the binding. Existing v0.3 configurations
+that define `deadzone` and `curve` on a `media-seek` action remain supported as
+a compatibility fallback when neither response field is present on the binding.
+The legacy fallback preserves the v0.3 transformation order and is never applied
+a second time when binding-level shaping is configured.
 
 The action reads the current media position when the gesture starts, then seeks
 relative to that starting position. It also reads optional MPRIS/playerctl
@@ -522,21 +524,29 @@ Gestures and actions are intentionally independent.
 
 ```toml
 [[bindings]]
-gesture = "right-edge"
-action = "screen-brightness"
-sensitivity = 1.20
+gesture = "top-edge"
+action = "media-position"
+sensitivity = 1.00
 invert = false
+deadzone = 0.025
+curve = 1.4
 ```
 
-`sensitivity` multiplies the gesture displacement before sending it to the action.
+`sensitivity` multiplies the transformed gesture displacement and `invert = true`
+reverses its direction.
 
-Set:
+`deadzone` and `curve` are optional binding-level response controls. When either
+field is present, shaping is applied to the raw normalized gesture displacement
+before sensitivity and inversion. The missing companion field uses its neutral
+default (`deadzone = 0.0`, `curve = 1.0`).
 
-```toml
-invert = true
-```
+`deadzone` must be in `[0, 0.5)` and filters small motion around the gesture
+start. `curve` must be greater than zero; `curve > 1` provides more precision
+near the starting point while `curve < 1` makes small movements more responsive.
+Full-scale input remains full-scale before sensitivity is applied.
 
-to reverse the direction.
+Bindings without these fields remain linear, except for the compatibility rule
+for v0.3 `media-seek` action-level `deadzone`/`curve` described above.
 
 For example, swapping brightness and volume only requires changing the bindings. No recompilation is required.
 

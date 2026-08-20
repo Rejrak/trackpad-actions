@@ -7,6 +7,13 @@ All notable changes to `trackpadd` are documented in this file.
 ### Added
 
 - Bottom-edge one-finger swipes with the same horizontal direction semantics as top-edge gestures.
+- Optional binding-level `deadzone` and response `curve` controls shared by continuous and command actions.
+
+### Changed
+
+- v0.3 `media-seek` action-level `deadzone`/`curve` remain supported as a
+  compatibility fallback; explicit binding-level shaping takes precedence and
+  is applied only once.
 
 ## [0.3.0] - 2026-08-18
 

@@ -469,6 +469,8 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
     }
 
     let mut action_map: HashMap<String, Box<dyn ContinuousAction>> = HashMap::new();
+    let mut legacy_media_response: HashMap<String, (f64, f64)> = HashMap::new();
+
     for action in actions {
         let (id, implementation): (String, Box<dyn ContinuousAction>) = match action {
             ActionConfig::Brightness {
@@ -524,13 +526,9 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                 deadzone,
                 curve,
             } => {
-                let implementation = MediaSeekAction::new(
-                    command,
-                    seconds_per_full_swipe,
-                    update_interval_ms,
-                    deadzone,
-                    curve,
-                )?;
+                legacy_media_response.insert(id.clone(), (deadzone, curve));
+                let implementation =
+                    MediaSeekAction::new(command, seconds_per_full_swipe, update_interval_ms)?;
                 (id, Box::new(implementation))
             }
         };
@@ -583,8 +581,10 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
             for binding in bindings {
                 if dry_run {
                     if event.phase == GesturePhase::Updated {
-                        let sign = if binding.invert { -1.0 } else { 1.0 };
-                        let delta = event.delta * binding.sensitivity * sign;
+                        let delta = binding.transform_delta(
+                            event.delta,
+                            legacy_media_response.get(&binding.action).copied(),
+                        );
                         println!(
                             "DRY  gesture={} action={} delta={delta:+.3}",
                             binding.gesture, binding.action
@@ -608,7 +608,12 @@ fn run(device: Option<PathBuf>, config_path: PathBuf, dry_run: bool) -> Result<(
                     continue;
                 };
 
-                match dispatch_action(action.as_mut(), binding, &event) {
+                match dispatch_action(
+                    action.as_mut(),
+                    binding,
+                    &event,
+                    legacy_media_response.get(&binding.action).copied(),
+                ) {
                     Ok(Some(value)) => {
                         print_action_value(binding, &value);
 
@@ -650,6 +655,7 @@ fn dispatch_action(
     action: &mut dyn ContinuousAction,
     binding: &BindingConfig,
     event: &GestureEvent,
+    legacy_media_response: Option<(f64, f64)>,
 ) -> Result<Option<ActionValue>> {
     match event.phase {
         GesturePhase::Started => {
@@ -657,8 +663,7 @@ fn dispatch_action(
             Ok(None)
         }
         GesturePhase::Updated => {
-            let sign = if binding.invert { -1.0 } else { 1.0 };
-            let delta = event.delta * binding.sensitivity * sign;
+            let delta = binding.transform_delta(event.delta, legacy_media_response);
             action.update(delta)
         }
         GesturePhase::Ended => action.finish(),

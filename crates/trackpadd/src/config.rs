@@ -158,6 +158,28 @@ impl AppConfig {
                 );
             }
 
+            if let Some(deadzone) = binding.deadzone {
+                if !deadzone.is_finite() || !(0.0..0.5).contains(&deadzone) {
+                    bail!(
+                        "binding gesture='{}' action='{}' has invalid deadzone {}; expected a finite value in [0, 0.5)",
+                        binding.gesture,
+                        binding.action,
+                        deadzone
+                    );
+                }
+            }
+
+            if let Some(curve) = binding.curve {
+                if !curve.is_finite() || curve <= 0.0 {
+                    bail!(
+                        "binding gesture='{}' action='{}' has invalid curve {}; expected a finite value > 0",
+                        binding.gesture,
+                        binding.action,
+                        curve
+                    );
+                }
+            }
+
             let pair = (binding.gesture.clone(), binding.action.clone());
             if !binding_pairs.insert(pair) {
                 bail!(
@@ -372,6 +394,38 @@ pub struct BindingConfig {
     pub sensitivity: f64,
     #[serde(default)]
     pub invert: bool,
+    #[serde(default)]
+    pub deadzone: Option<f64>,
+    #[serde(default)]
+    pub curve: Option<f64>,
+}
+
+impl BindingConfig {
+    pub fn transform_delta(&self, delta: f64, legacy_media_response: Option<(f64, f64)>) -> f64 {
+        let sign = if self.invert { -1.0 } else { 1.0 };
+
+        if self.deadzone.is_some() || self.curve.is_some() {
+            let deadzone = self.deadzone.unwrap_or(0.0);
+            let curve = self.curve.unwrap_or(1.0);
+            return shape_delta(delta, deadzone, curve) * self.sensitivity * sign;
+        }
+
+        let transformed = delta * self.sensitivity * sign;
+        match legacy_media_response {
+            Some((deadzone, curve)) => shape_delta(transformed, deadzone, curve),
+            None => transformed,
+        }
+    }
+}
+
+fn shape_delta(delta: f64, deadzone: f64, curve: f64) -> f64 {
+    let magnitude = delta.abs();
+    if magnitude <= deadzone {
+        return 0.0;
+    }
+
+    let normalized = ((magnitude - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0);
+    delta.signum() * normalized.powf(curve)
 }
 
 fn validate_id(kind: &str, id: &str) -> Result<()> {
@@ -700,6 +754,122 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("invalid sensitivity"));
+    }
+
+    #[test]
+    fn binding_response_fields_default_to_legacy_mode() {
+        let config = parse(VALID_CONFIG).unwrap();
+        let binding = &config.bindings[0];
+
+        assert_eq!(binding.deadzone, None);
+        assert_eq!(binding.curve, None);
+        assert!((binding.transform_delta(0.25, None) - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn binding_response_fields_parse_and_shape_before_sensitivity() {
+        let config = parse(
+            r#"
+            [[gestures]]
+            id = "edge"
+            type = "edge-swipe"
+            edge = "left"
+
+            [[actions]]
+            id = "debug"
+            type = "print"
+
+            [[bindings]]
+            gesture = "edge"
+            action = "debug"
+            sensitivity = 1.5
+            invert = true
+            deadzone = 0.05
+            curve = 2.0
+            "#,
+        )
+        .unwrap();
+
+        let binding = &config.bindings[0];
+        assert_eq!(binding.deadzone, Some(0.05));
+        assert_eq!(binding.curve, Some(2.0));
+        assert_eq!(binding.transform_delta(0.04, None), 0.0);
+
+        let transformed = binding.transform_delta(0.50, None);
+        assert!(transformed < 0.0);
+        assert!(transformed.abs() < 0.50);
+    }
+
+    #[test]
+    fn binding_response_rejects_invalid_values() {
+        for invalid in [
+            "deadzone = -0.01",
+            "deadzone = 0.5",
+            "curve = 0",
+            "curve = -1",
+        ] {
+            let source = format!(
+                r#"
+                [[gestures]]
+                id = "edge"
+                type = "edge-swipe"
+                edge = "left"
+
+                [[actions]]
+                id = "debug"
+                type = "print"
+
+                [[bindings]]
+                gesture = "edge"
+                action = "debug"
+                {invalid}
+                "#
+            );
+
+            assert!(
+                parse(&source).is_err(),
+                "expected invalid binding response: {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_media_response_preserves_v03_transform_order() {
+        let legacy = BindingConfig {
+            gesture: "top-edge".to_string(),
+            action: "media-position".to_string(),
+            sensitivity: 2.0,
+            invert: false,
+            deadzone: None,
+            curve: None,
+        };
+
+        assert!(legacy
+            .transform_delta(0.020, Some((0.025, 1.4)))
+            .is_sign_positive());
+
+        let explicit = BindingConfig {
+            deadzone: Some(0.025),
+            curve: Some(1.4),
+            ..legacy.clone()
+        };
+
+        assert_eq!(explicit.transform_delta(0.020, Some((0.025, 1.4))), 0.0);
+    }
+
+    #[test]
+    fn explicit_binding_response_overrides_legacy_media_fallback() {
+        let binding = BindingConfig {
+            gesture: "top-edge".to_string(),
+            action: "media-position".to_string(),
+            sensitivity: 1.0,
+            invert: false,
+            deadzone: Some(0.0),
+            curve: Some(1.0),
+        };
+
+        let transformed = binding.transform_delta(0.10, Some((0.20, 3.0)));
+        assert!((transformed - 0.10).abs() < f64::EPSILON);
     }
 
     #[test]

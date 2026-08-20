@@ -294,8 +294,6 @@ pub struct MediaSeekAction {
     command: String,
     seconds_per_full_swipe: f64,
     update_interval: Duration,
-    deadzone: f64,
-    curve: f64,
     start_position: Option<f64>,
     metadata: MediaMetadata,
     last_delta: f64,
@@ -308,8 +306,6 @@ impl MediaSeekAction {
         command: String,
         seconds_per_full_swipe: f64,
         update_interval_ms: u64,
-        deadzone: f64,
-        curve: f64,
     ) -> Result<Self> {
         if command.trim().is_empty() {
             bail!("media-seek command must not be empty");
@@ -320,19 +316,10 @@ impl MediaSeekAction {
         if update_interval_ms == 0 {
             bail!("media-seek update_interval_ms must be > 0");
         }
-        if !deadzone.is_finite() || !(0.0..0.5).contains(&deadzone) {
-            bail!("media-seek deadzone must be a finite value in [0, 0.5)");
-        }
-        if !curve.is_finite() || curve <= 0.0 {
-            bail!("media-seek curve must be a finite value > 0");
-        }
-
         Ok(Self {
             command,
             seconds_per_full_swipe,
             update_interval: Duration::from_millis(update_interval_ms),
-            deadzone,
-            curve,
             start_position: None,
             metadata: MediaMetadata::default(),
             last_delta: 0.0,
@@ -386,21 +373,11 @@ impl MediaSeekAction {
         parse_media_metadata(&String::from_utf8_lossy(&output.stdout), SEPARATOR)
     }
 
-    fn shaped_delta(&self, delta: f64) -> f64 {
-        let magnitude = delta.abs();
-        if magnitude <= self.deadzone {
-            return 0.0;
-        }
-
-        let normalized = ((magnitude - self.deadzone) / (1.0 - self.deadzone)).clamp(0.0, 1.0);
-        delta.signum() * normalized.powf(self.curve)
-    }
-
     fn target_position(&self, delta: f64) -> Result<f64> {
         let start = self
             .start_position
             .ok_or_else(|| anyhow!("media-seek action updated before begin"))?;
-        let offset = self.shaped_delta(delta) * self.seconds_per_full_swipe;
+        let offset = delta.clamp(-1.0, 1.0) * self.seconds_per_full_swipe;
         let target = (start + offset).max(0.0);
 
         Ok(match self.metadata.duration {
@@ -789,31 +766,10 @@ mod tests {
     }
 
     #[test]
-    fn media_seek_deadzone_filters_small_motion() {
-        let action = MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
-
-        assert_eq!(action.shaped_delta(0.020), 0.0);
-        assert_eq!(action.shaped_delta(-0.020), 0.0);
-        assert!(action.shaped_delta(0.25) > 0.0);
-        assert!(action.shaped_delta(-0.25) < 0.0);
-    }
-
-    #[test]
-    fn media_seek_curve_preserves_full_scale_and_direction() {
-        let action = MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
-
-        assert!((action.shaped_delta(1.0) - 1.0).abs() < f64::EPSILON);
-        assert!((action.shaped_delta(-1.0) + 1.0).abs() < f64::EPSILON);
-        assert!(action.shaped_delta(0.25) < 0.25);
-    }
-
-    #[test]
-    fn media_seek_rejects_invalid_parameters() {
-        assert!(MediaSeekAction::new("".to_string(), 60.0, 50, 0.025, 1.4).is_err());
-        assert!(MediaSeekAction::new("playerctl".to_string(), 0.0, 50, 0.025, 1.4).is_err());
-        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 0, 0.025, 1.4).is_err());
-        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.5, 1.4).is_err());
-        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 0.0).is_err());
+    fn media_seek_rejects_invalid_backend_parameters() {
+        assert!(MediaSeekAction::new("".to_string(), 60.0, 50).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 0.0, 50).is_err());
+        assert!(MediaSeekAction::new("playerctl".to_string(), 60.0, 0).is_err());
     }
 
     #[test]
@@ -942,8 +898,7 @@ mod tests {
 
     #[test]
     fn media_target_is_clamped_to_known_duration() {
-        let mut action =
-            MediaSeekAction::new("playerctl".to_string(), 60.0, 50, 0.025, 1.4).unwrap();
+        let mut action = MediaSeekAction::new("playerctl".to_string(), 60.0, 50).unwrap();
         action.start_position = Some(300.0);
         action.metadata.duration = Some(312.0);
 
