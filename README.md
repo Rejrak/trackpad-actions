@@ -11,7 +11,7 @@ The project intentionally keeps Linux input handling, gesture recognition, confi
 ## Features
 
 * One-finger vertical swipes starting from the **left** or **right** physical trackpad edge.
-* One-finger horizontal swipes starting from the **top** physical trackpad edge.
+* One-finger horizontal swipes starting from the **top** or **bottom** physical trackpad edge.
 * Configurable activation width and cancellation margin.
 * Configurable gesture sensitivity and direction inversion.
 * Screen brightness control through `brightnessctl`.
@@ -391,11 +391,12 @@ cancel_margin = 0.04
 left
 right
 top
+bottom
 ```
 
 Left and right edges track vertical movement: positive delta means moving up.
 
-The top edge tracks horizontal movement: positive delta means moving right and negative delta means moving left.
+The top and bottom edges track horizontal movement: positive delta means moving right and negative delta means moving left.
 
 `width` controls the activation zone. For example:
 
@@ -405,7 +406,7 @@ width = 0.06
 
 means that the outermost 6% of the selected physical edge is used as the gesture activation zone.
 
-For `edge = "top"`, the same value describes the top 6% of the trackpad height, while the gesture displacement itself is measured horizontally.
+For `edge = "top"` or `edge = "bottom"`, the same value describes the corresponding 6% band of the trackpad height, while the gesture displacement itself is measured horizontally.
 
 `cancel_margin` adds extra inward tolerance once the gesture has started.
 
@@ -423,6 +424,19 @@ cancel_margin = 0.10
 ```
 
 It must start in the top activation band. Moving right produces a positive delta; moving left produces a negative delta. Moving too far downward after activation cancels the gesture.
+
+A horizontal bottom-edge swipe uses the same direction convention:
+
+```toml
+[[gestures]]
+id = "bottom-edge"
+type = "edge-swipe"
+edge = "bottom"
+width = 0.06
+cancel_margin = 0.10
+```
+
+It must start in the bottom activation band. Moving too far upward after activation cancels the gesture.
 
 Command actions can distinguish the two directions with `direction = "right"` and `direction = "left"`.
 

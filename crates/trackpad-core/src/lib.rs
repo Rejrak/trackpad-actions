@@ -22,6 +22,7 @@ pub enum Edge {
     Left,
     Right,
     Top,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub struct GestureEvent {
     /// Signed displacement from the gesture start.
     ///
     /// For left/right edges, positive means moving up.
-    /// For the top edge, positive means moving right.
+    /// For top/bottom edges, positive means moving right.
     pub delta: f64,
 }
 
@@ -56,7 +57,7 @@ struct ActiveGesture {
 
 /// Recognizes one-finger swipes that *start* on a physical trackpad edge.
 ///
-/// Left/right edges track vertical movement. The top edge tracks horizontal movement.
+/// Left/right edges track vertical movement. Top/bottom edges track horizontal movement.
 /// `activation_width` is the edge depth, e.g. 0.06 means the outer 6%.
 /// `cancel_margin` adds hysteresis: once active, the finger may drift further inward
 /// before the gesture is cancelled.
@@ -91,6 +92,7 @@ impl EdgeSwipeRecognizer {
             Edge::Left => contact.x <= self.activation_width,
             Edge::Right => contact.x >= 1.0 - self.activation_width,
             Edge::Top => contact.y <= self.activation_width,
+            Edge::Bottom => contact.y >= 1.0 - self.activation_width,
         }
     }
 
@@ -100,20 +102,21 @@ impl EdgeSwipeRecognizer {
             Edge::Left => contact.x <= tracking_width,
             Edge::Right => contact.x >= 1.0 - tracking_width,
             Edge::Top => contact.y <= tracking_width,
+            Edge::Bottom => contact.y >= 1.0 - tracking_width,
         }
     }
 
     fn axis_position(&self, contact: &Contact) -> f64 {
         match self.edge {
             Edge::Left | Edge::Right => contact.y,
-            Edge::Top => contact.x,
+            Edge::Top | Edge::Bottom => contact.x,
         }
     }
 
     fn delta(&self, start_axis: f64, contact: &Contact) -> f64 {
         match self.edge {
             Edge::Left | Edge::Right => start_axis - contact.y,
-            Edge::Top => contact.x - start_axis,
+            Edge::Top | Edge::Bottom => contact.x - start_axis,
         }
     }
 }
@@ -294,5 +297,44 @@ mod tests {
 
         assert!(recognizer.process(&frame(Some(14), 0.40, 0.50)).is_empty());
         assert!(recognizer.process(&frame(Some(14), 0.60, 0.02)).is_empty());
+    }
+
+    #[test]
+    fn bottom_edge_swipe_tracks_horizontal_motion() {
+        let mut recognizer = EdgeSwipeRecognizer::new("bottom-edge", Edge::Bottom, 0.06, 0.04);
+
+        let start = recognizer.process(&frame(Some(15), 0.30, 0.97));
+        assert_eq!(start[0].phase, GesturePhase::Started);
+
+        let update = recognizer.process(&frame(Some(15), 0.55, 0.96));
+        assert_eq!(update[0].phase, GesturePhase::Updated);
+        assert!((update[0].delta - 0.25).abs() < 1e-9);
+
+        let end = recognizer.process(&frame(None, 0.0, 0.0));
+        assert_eq!(end[0].phase, GesturePhase::Ended);
+    }
+
+    #[test]
+    fn bottom_edge_swipe_left_is_negative() {
+        let mut recognizer = EdgeSwipeRecognizer::new("bottom-edge", Edge::Bottom, 0.06, 0.04);
+        recognizer.process(&frame(Some(16), 0.70, 0.98));
+        let update = recognizer.process(&frame(Some(16), 0.45, 0.97));
+        assert_eq!(update[0].phase, GesturePhase::Updated);
+        assert!((update[0].delta + 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bottom_edge_swipe_cancels_when_moving_too_far_up() {
+        let mut recognizer = EdgeSwipeRecognizer::new("bottom-edge", Edge::Bottom, 0.06, 0.04);
+        recognizer.process(&frame(Some(17), 0.40, 0.97));
+        let events = recognizer.process(&frame(Some(17), 0.60, 0.80));
+        assert_eq!(events[0].phase, GesturePhase::Cancelled);
+    }
+
+    #[test]
+    fn existing_contact_entering_bottom_edge_does_not_start() {
+        let mut recognizer = EdgeSwipeRecognizer::new("bottom-edge", Edge::Bottom, 0.06, 0.04);
+        assert!(recognizer.process(&frame(Some(18), 0.40, 0.50)).is_empty());
+        assert!(recognizer.process(&frame(Some(18), 0.60, 0.98)).is_empty());
     }
 }

@@ -40,6 +40,15 @@ cancel_margin = 0.04
 # width = 0.06
 # cancel_margin = 0.10
 
+# The bottom edge uses the same horizontal direction semantics.
+#
+# [[gestures]]
+# id = "bottom-edge"
+# type = "edge-swipe"
+# edge = "bottom"
+# width = 0.06
+# cancel_margin = 0.10
+
 # MVP backend: brightnessctl. Keep a non-zero minimum while experimenting.
 [[actions]]
 id = "screen-brightness"

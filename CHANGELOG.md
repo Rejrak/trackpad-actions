@@ -4,6 +4,10 @@ All notable changes to `trackpadd` are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Bottom-edge one-finger swipes with the same horizontal direction semantics as top-edge gestures.
+
 ## [0.3.0] - 2026-08-18
 
 ### Added

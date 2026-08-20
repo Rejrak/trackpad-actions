@@ -278,6 +278,7 @@ pub enum EdgeConfig {
     Left,
     Right,
     Top,
+    Bottom,
 }
 
 #[derive(Debug, Deserialize)]
@@ -549,6 +550,30 @@ mod tests {
                 edge: EdgeConfig::Top,
                 ..
             }] if id == "top-edge"
+        ));
+    }
+
+    #[test]
+    fn bottom_edge_gesture_config_parses() {
+        let config = parse(
+            r#"
+            [[gestures]]
+            id = "bottom-edge"
+            type = "edge-swipe"
+            edge = "bottom"
+            width = 0.06
+            cancel_margin = 0.04
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.gestures.as_slice(),
+            [GestureConfig::EdgeSwipe {
+                id,
+                edge: EdgeConfig::Bottom,
+                ..
+            }] if id == "bottom-edge"
         ));
     }
 
